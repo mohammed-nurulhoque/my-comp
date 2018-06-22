@@ -1,0 +1,173 @@
+use {ast::*};
+grammar;
+
+pub Program: Vec<Binding> = {
+    Statement*,
+};
+
+Statement: Binding = {
+    TypeDecl,
+    Binding,
+    FnBinding,
+}
+
+TypeDecl: Binding = {
+    "type" <name:ID> <vars:TypeVars> "=" <variants:SumVarDecl+> ";" => Binding::Type {<>},
+};
+
+TypeVars: Vec<String> = {
+    "()" => vec![],
+    ID => vec![<>],
+    "(" <v:(<ID> ",")+> <last:ID> ")" => {
+        let mut v = v;
+        v.push(last);
+        v
+    },
+}
+
+SumVarDecl = {
+    "|" <ID> <Type>,
+};
+
+Binding: Binding = {
+    <Pattern> "=" <Expr> ";" => Binding::Value(<>),
+};
+
+FnBinding: Binding = {
+    "fn" <ID> "=" <Arm+> ";" => Binding::Function(<>),
+};
+
+Arm = {
+    "|" <Pattern> "=>" <Expr>,
+};
+
+Pattern: Pattern = {
+    Literal => Pattern::Literal(<>),
+    "_" => Pattern::Wild,
+    ID => Pattern::Bind(<>),
+    <name:ID> "." <variant:ID> <field:Pattern> => Pattern::SumVar {name, variant, field:Box::new(field)},
+    "(" <v:(<Pattern> ",")+> <last:Pattern> ")" => {
+        let mut v = v;
+        v.push(last);
+        Pattern::Tuple(v)
+    },
+    "(" <Pattern> ")",
+};
+
+Class<Op,NextClass>: Expr = {
+    <l:Class<Op,NextClass>> <op:Op> <r:NextClass> => 
+        Expr::BinOp(Box::new(l), op, Box::new(r)),
+    NextClass,
+};
+
+UnaryClass<Op, NextClass>: Expr = {
+    <op:Op> <e:UnaryClass<Op,NextClass>> => Expr::UnOp(op, Box::new(e)),
+    NextClass,
+};
+
+Type: Type = {
+    <SimpleType>,
+    <from:SimpleType> "->" <to:Type> => Type::Function(Box::new(from), Box::new(to)),
+};
+
+SimpleType: Type = {
+    "()" => Type::Unit,
+    "int" => Type::Int,
+    "bool" => Type::Bool,
+    "string" => Type::String,
+    "(" <Type> ")",
+    <ID> => Type::Generic(<>),
+    <name:ID> <tp:SimpleType> => Type::Sum(name, Box::new(tp)),
+    "(" <v:(<Type> ",")+> <t: Type> ")" => {
+        let mut v = v;
+        v.push(t);
+        Type::Tuple(v)
+    },
+};
+
+pub Expr: Expr = {
+    <name:ID> "." <variant:ID> <field:Expr> => Expr::SumVar {name, variant, field:Box::new(field)},
+    "(" <v:(<Expr> ",")+> <last:Expr> ")" => {
+        let mut v = v;
+        v.push(last);
+        Expr::Tuple(v)
+    },
+
+    "if" <cond:Expr> "then" <a:Expr> "else" <b:Expr> ";" => {
+        Expr::Conditional(Box::new(cond), Box::new(a), Box::new(b))
+    },
+    "fn" "(" <v:(<Arm> ",")+> <last:Arm> ")" => {
+        let mut v = v;
+        v.push(last);
+        Expr::Function(v)
+    },
+    Expr0,
+};
+
+Expr0 = Class<Op0,Expr1>;       // and or
+Expr1 = Class<Op1,Expr2>;       // compare
+Expr2 = Class<Op2,Expr3>;       // eq !=
+Expr3 = Class<Op3,Expr4>;       // factor
+Expr4 = Class<Op4,Expr5>;       // term
+Expr5 = UnaryClass<Op5,Term>;   //unary
+
+Term: Expr  = {
+    <hd:Base> <v:Base*> => {
+        let mut expr = hd;
+        for e in v {
+            expr = Expr::Application(Box::new(expr), Box::new(e));
+        }
+        expr
+    },
+};
+
+Base: Expr = {
+    <Literal> => Expr::Literal(<>),
+    ID => Expr::Bound(<>),
+    "(" <Expr> ")",
+};
+
+Literal: Literal = {
+    r#""(\\.|[^"\\])*""# => Literal::String(<>.to_string()),
+    r"-?[1-9][0-9]*" => Literal::Int(isize::from_str_radix(<>, 10).unwrap()),
+    "true" => Literal::Bool(true),
+    "false" => Literal::Bool(false),
+    "()" => Literal::Unit,
+};
+
+Op0: BinOpcode = {
+    "and" => BinOpcode::And,
+    "or" => BinOpcode::Or,
+};
+
+Op1: BinOpcode = {
+    ">" => BinOpcode::Greater,
+    "<" => BinOpcode::Less,
+    ">=" => BinOpcode::GreaterEq,
+    "<=" => BinOpcode::LessEq,
+};
+
+Op2: BinOpcode = {
+    "=" => BinOpcode::Equal,
+    "!=" => BinOpcode::NotEq,
+};
+
+Op3: BinOpcode = {
+    "+" => BinOpcode::Add,
+    "-" => BinOpcode::Sub,
+};
+
+Op4: BinOpcode = {
+    "*" => BinOpcode::Mul,
+    "/" => BinOpcode::Div,
+    "%" => BinOpcode::Mod,
+};
+
+Op5: UnOpcode = {
+    "not" => UnOpcode::Not,
+    "-" => UnOpcode::Minus,
+};
+
+ID: String = {
+    r"[a-zA-Z_'][a-zA-Z_'0-9]*" => <>.to_string(),
+}
