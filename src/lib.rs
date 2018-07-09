@@ -1,3 +1,5 @@
 pub mod ast;
 pub mod grammar;
-mod grammer_test;
+pub mod types;
+pub mod type_check;
+pub mod imper_ast;

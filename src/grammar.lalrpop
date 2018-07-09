@@ -1,4 +1,6 @@
 use {ast::*};
+use std::rc::Rc;
+use types::{ProtoType, Literal, BinOpcode, UnOpcode};
 grammar;
 
 pub Program: Vec<Binding> = {
@@ -34,24 +36,28 @@ Binding: Binding = {
 };
 
 FnBinding: Binding = {
-    "fn" <ID> "=" <Arm+> ";" => Binding::Function(<>),
+    "fn" <name:ID> "=" <variants:Arm+> ";" => Binding::Function {<>},
 };
 
 Arm = {
-    "|" <Pattern> "=>" <Expr>,
+    "|" <Pattern+> "=>" <Expr>,
 };
 
 Pattern: Pattern = {
     Literal => Pattern::Literal(<>),
     "_" => Pattern::Wild,
     ID => Pattern::Bind(<>),
-    <name:ID> "." <variant:ID> <field:Pattern> => Pattern::SumVar {name, variant, field:Box::new(field)},
     "(" <v:(<Pattern> ",")+> <last:Pattern> ")" => {
         let mut v = v;
         v.push(last);
         Pattern::Tuple(v)
     },
-    "(" <Pattern> ")",
+    "(" <PatternH> ")",
+};
+
+PatternH: Pattern = {
+    <id:ID> <field:Pattern> =>  Pattern::SumVar(vec![id], Box::new(field)),
+    Pattern,
 };
 
 Class<Op,NextClass>: Expr = {
@@ -65,34 +71,27 @@ UnaryClass<Op, NextClass>: Expr = {
     NextClass,
 };
 
-Type: Type = {
+Type: ProtoType = {
     <SimpleType>,
-    <from:SimpleType> "->" <to:Type> => Type::Function(Box::new(from), Box::new(to)),
+    <from:SimpleType> "->" <to:Type> => ProtoType::Function(Rc::new(from), Rc::new(to)),
 };
 
-SimpleType: Type = {
-    "()" => Type::Unit,
-    "int" => Type::Int,
-    "bool" => Type::Bool,
-    "string" => Type::String,
+SimpleType: ProtoType = {
+    "()" => ProtoType::Unit,
+    "int" => ProtoType::Int,
+    "bool" => ProtoType::Bool,
+    "string" => ProtoType::String,
     "(" <Type> ")",
-    <ID> => Type::Generic(<>),
-    <name:ID> <tp:SimpleType> => Type::Sum(name, Box::new(tp)),
+    <ID> => ProtoType::Generic(<>),
+    <name:ID> <tp:SimpleType> => ProtoType::Sum(name, Rc::new(tp)),
     "(" <v:(<Type> ",")+> <t: Type> ")" => {
         let mut v = v;
         v.push(t);
-        Type::Tuple(v)
+        ProtoType::Tuple(v)
     },
 };
 
 pub Expr: Expr = {
-    <name:ID> "." <variant:ID> <field:Expr> => Expr::SumVar {name, variant, field:Box::new(field)},
-    "(" <v:(<Expr> ",")+> <last:Expr> ")" => {
-        let mut v = v;
-        v.push(last);
-        Expr::Tuple(v)
-    },
-
     "if" <cond:Expr> "then" <a:Expr> "else" <b:Expr> ";" => {
         Expr::Conditional(Box::new(cond), Box::new(a), Box::new(b))
     },
@@ -123,12 +122,21 @@ Term: Expr  = {
 
 Base: Expr = {
     <Literal> => Expr::Literal(<>),
-    ID => Expr::Bound(<>),
+    <path:(<ID> ".")*> <bound:ID> => {
+        let mut path = path;
+        path.push(bound);
+        Expr::Bound(path)
+    },
+    "(" <v:(<Expr> ",")+> <last:Expr> ")" => {
+        let mut v = v;
+        v.push(last);
+        Expr::Tuple(v)
+    },
     "(" <Expr> ")",
 };
 
 Literal: Literal = {
-    r#""(\\.|[^"\\])*""# => Literal::String(<>.to_string()),
+    r#""(\\.|[^"\\])*""# => Literal::String(<>[1..(<>.len()-1)].to_string()),
     r"-?[1-9][0-9]*" => Literal::Int(isize::from_str_radix(<>, 10).unwrap()),
     "true" => Literal::Bool(true),
     "false" => Literal::Bool(false),
