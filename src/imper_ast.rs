@@ -17,10 +17,17 @@
 use std::collections::HashMap;
 use types::{Type, Literal, BinOpcode, UnOpcode};
 
+#[derive(Clone)]
+pub enum ValPath {
+    Local(Vec<usize>),
+    Capture(Vec<usize>),
+    Static(Vec<usize>),
+}
+
 pub struct TypeDecl {
-    name: String,
-    num_generics: usize,
-    variants: Vec<(String,Type)>,
+    pub name: String,
+    pub num_generics: usize,
+    pub variants: Vec<(String,Type)>,
 }
 
 pub struct Closure {
@@ -33,11 +40,11 @@ pub struct Closure {
 pub enum DTree {
     Empty,
     Finite {
-        value: Vec<usize>,
+        value: ValPath,
         branches: Vec<DTree>,
     },
     Infinite {
-        value: Vec<usize>,
+        value: ValPath,
         branches: HashMap<usize,DTree>,
         default: Box<DTree>,
     },
@@ -45,7 +52,7 @@ pub enum DTree {
 
 pub enum Expr {
     Literal(Literal),
-    Bound(Vec<usize>, Type),
+    Bound(ValPath, Type),
     Tuple(Vec<Expr>),
 
     BinOp(Box<Expr>, BinOpcode, Box<Expr>),
@@ -55,5 +62,5 @@ pub enum Expr {
     Application(Box<Expr>, Box<Expr>),
 
     Conditional(Box<Expr>, Box<Expr>, Box<Expr>),
-    Match(Vec<usize>, DTree, Vec<Expr>),
+    Match(DTree, Vec<Expr>),
 }

@@ -1,13 +1,69 @@
 use ast::{
     Expr as E1
 };
-use imper_ast::Expr;
+use imper_ast::{
+    Expr as E2,
+    ValPath,
+};
 use types::{ProtoType, Type};
 use std::{
     collections::HashMap,
     rc::Rc,
+    cell::RefCell,
 };
 
+#[derive(Clone, Copy)]
+pub enum NameScope {Local, Capture(usize), Static}
+
+pub struct Scope<'a> {
+    local: HashMap<String, (ValPath, Rc<Type>)>,
+    captures: RefCell<HashMap<&'a str, (ValPath, usize, Rc<Type>)>>,
+    next: Option<&'a Scope<'a>>,
+}
+
+impl<'a,'b> Scope<'a> where 'b: 'a {
+    fn insert(&mut self, name: String, path: ValPath, t: &Rc<Type>) {
+        self.local.insert(name, (path, Rc::clone(t)));
+    }
+
+     fn get(&self, name: &'b str) -> Option<(&ValPath, &Rc<Type>)> {
+        if let Some((path, t)) = self.local.get(name) {
+            Some((path, t))
+        } else if let Some((path, _, t)) =  self.captures.borrow().get(name) {
+            Some((path, t))
+        } else {
+            let mut node = self.next;
+            let mut v = Vec::new();
+            let (path, t): (ValPath, Rc<Type>) = loop {
+                if let None = node {
+                    return None;
+                }
+                let val = node.unwrap();
+                if let Some((path, t)) = val.local.get(name) {
+                    break (path.clone(), Rc::clone(t));
+                } else if let Some((path, _, t)) = val.captures.borrow().get(&name) {
+                    break (path.clone(), Rc::clone(t));
+                }
+                v.push(&val.captures);
+                node = val.next;
+            };
+
+            v.into_iter().map(|x| (x.borrow_mut(), x.borrow().len())).rev()
+                .fold(path, |path, (mut hm, len)| {
+                    hm.insert(name, (path, len, Rc::clone(&t)));
+                    ValPath::Capture(vec![len])
+                });
+
+            None
+        }
+    }
+}
+/*
+transform <- patterns in reverse
+Vec<Pattern> * Dtree * constrained set * int * Scope * Vec<int> * int * mut
+                        in dtree       ith pat         generic for each / next
+-> Dtree * constrained set * int
+*/
 /*
 struct Map<'a> {
     map: HashMap<String, Item<'a>>,
