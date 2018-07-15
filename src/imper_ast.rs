@@ -17,7 +17,7 @@
 use std::collections::HashMap;
 use types::{Type, Literal, BinOpcode, UnOpcode};
 
-#[derive(Clone)]
+#[derive(Clone, Ord)]
 pub enum ValPath {
     Local(Vec<usize>),
     Capture(Vec<usize>),

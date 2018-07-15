@@ -31,7 +31,7 @@ pub enum Pattern {
     /// matches a tuple (recursively)
     Tuple(Vec<Pattern>),
     /// matches a variant of a sum type and its argument with leading path
-    SumVar(Vec<String>, Box<Pattern>),
+    SumVar(String, Box<Pattern>),
 }
 
 /// An expression or RHS that evaluates to a value,
@@ -40,7 +40,7 @@ pub enum Expr {
     /// a value literal e.g int, string
     Literal(Literal),
     /// value of a name that was previously bound with leading path
-    Bound(Vec<String>),
+    Bound(String),
     /// a tuple of values
     Tuple(Vec<Expr>),
 

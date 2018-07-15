@@ -1,23 +1,48 @@
 use ast::{
-    Expr as E1
+    Expr as E1,
+    Pattern,
 };
 use imper_ast::{
     Expr as E2,
     ValPath,
 };
-use types::{ProtoType, Type};
-use std::{
-    collections::HashMap,
-    rc::Rc,
-    cell::RefCell,
+use types::{
+    ProtoType,
+    Type,
+    Literal
 };
 
-#[derive(Clone, Copy)]
-pub enum NameScope {Local, Capture(usize), Static}
+use std::{
+    ops::Deref,
+    collections::HashMap,
+    rc::Rc,
+    cell::{
+        RefCell,
+        Ref,
+    },
+};
+
+type type_constraint = (Rc<Type>, Rc<Type>);
+
+enum NameInfo<'a> {
+    Direct(&'a (ValPath, Rc<Type>)),
+    Wrapped(Ref<'a, (ValPath, Rc<Type>)>),
+}
+
+impl<'a> Deref for NameInfo<'a> {
+    type target = (ValPath, Rc<Type>);
+
+    fn deref(&self) -> &Self::target {
+        match *self {
+            NameInfo::Direct(reference) => &reference,
+            NameInfo::Wrapped(reference) => &reference,
+        }
+    }
+}
 
 pub struct Scope<'a> {
     local: HashMap<String, (ValPath, Rc<Type>)>,
-    captures: RefCell<HashMap<&'a str, (ValPath, usize, Rc<Type>)>>,
+    captures: RefCell<HashMap<&'a str, (usize, (ValPath, Rc<Type>))>>,
     next: Option<&'a Scope<'a>>,
 }
 
@@ -26,35 +51,102 @@ impl<'a,'b> Scope<'a> where 'b: 'a {
         self.local.insert(name, (path, Rc::clone(t)));
     }
 
-     fn get(&self, name: &'b str) -> Option<(&ValPath, &Rc<Type>)> {
-        if let Some((path, t)) = self.local.get(name) {
-            Some((path, t))
-        } else if let Some((path, _, t)) =  self.captures.borrow().get(name) {
-            Some((path, t))
+     fn get(&self, name: &'b str) -> Option<NameInfo> {
+        if let Some(val) = self.local.get(name) {
+            return Some(NameInfo::Direct(val));
         } else {
-            let mut node = self.next;
-            let mut v = Vec::new();
-            let (path, t): (ValPath, Rc<Type>) = loop {
-                if let None = node {
-                    return None;
-                }
-                let val = node.unwrap();
-                if let Some((path, t)) = val.local.get(name) {
-                    break (path.clone(), Rc::clone(t));
-                } else if let Some((path, _, t)) = val.captures.borrow().get(&name) {
-                    break (path.clone(), Rc::clone(t));
-                }
-                v.push(&val.captures);
-                node = val.next;
-            };
+            let map = self.captures.borrow();
+            if let Some(_) =  map.get(name) {
+                return Some(NameInfo::Wrapped(Ref::map(map, |map| &map.get(name).unwrap().1)));
+            }
+        }
 
-            v.into_iter().map(|x| (x.borrow_mut(), x.borrow().len())).rev()
-                .fold(path, |path, (mut hm, len)| {
-                    hm.insert(name, (path, len, Rc::clone(&t)));
-                    ValPath::Capture(vec![len])
+        let mut node = self.next;
+        let mut v = Vec::new();
+        let (path, t): (ValPath, Rc<Type>) = loop {
+            if let None = node {
+                return None;
+            }
+            let val = node.unwrap();
+            if let Some((path, t)) = val.local.get(name) {
+                break (path.clone(), Rc::clone(t));
+            } else if let Some((_, (path, t))) = val.captures.borrow().get(&name) {
+                break (path.clone(), Rc::clone(t));
+            }
+            v.push(&val.captures);
+            node = val.next;
+        };
+
+        v.into_iter().map(|x| (x.borrow_mut(), x.borrow().len())).rev()
+            .fold(path, |path, (mut hm, len)| {
+                hm.insert(name, (len, (path, Rc::clone(&t))));
+                ValPath::Capture(vec![len])
+            });
+        self.get(name)
+    }
+}
+
+enum Error {
+    MultBindPattern(String),
+    ConstructorNotFound(String),
+}
+
+impl Pattern {
+    fn transform<'a> (self, 
+        var: usize, next: usize,
+        path: &mut Vec<usize>,
+        map: &mut HashMap<String, (ValPath, Rc<Type>)>,
+        scope: &Scope<'a>,
+        type_consts: &mut Vec<type_constraint>, 
+        val_consts: &mut HashMap<ValPath, Literal>
+    ) -> Result<(), Error> {
+        match self {
+            Pattern::Wild => Ok(()),
+            Pattern::Literal(Literal::Unit) => Ok(()),
+            Pattern::Literal(l) => {
+                let t = match l {
+                    Literal::Int(_)     => Type::Int,
+                    Literal::Bool(_)    => Type::Bool,
+                    Literal::String(_)  => Type::String,
+                };
+                type_consts.push((Rc::new(Type::Variable(var)), Rc::new(t)));
+                val_consts.insert(path.clone(), l);
+                Ok(())
+            },
+            Pattern::Bind(s) => {
+                match map.get(s) {
+                    Some(_) => Err(Error::MultBindPattern(s)),
+                    None => {
+                        map.insert(s, (ValPath::Local(path.clone()), Rc::new(Type::Variable(var))));
+                        Ok(())
+                    }
+                }
+            },
+            Pattern::Tuple(v) => {
+                let len = v.len();
+                type_consts.push((
+                    Rc::new(Type::Variable(var)), 
+                    Rc::new(Type::Tuple((0..len).map(|i| Type::Variable(next + i)).collect()))
+                ));
+                v.into_iter().enumerate().map(|(i, pat)| {
+                    path.push(i);
+                    let result = pat.transform(next + i, next + len, path, map,
+                        scope, type_consts, val_consts);
+                    path.pop();
+                    result
                 });
-
-            None
+                Ok(()) // FIXME
+            },
+            Pattern::SumVar(constructor, pat) => {
+                match scope.get(constructor) {
+                    None => Err(Error::ConstructorNotFound(constructor)),
+                    Some((_, t)) => { // fix <- not any type just constructor type
+                        type_consts.push((Rc::new(Type::Variable(var)), Rc::clone(t)));
+                        type_consts
+                        Ok(()) // FIXME
+                    }
+                }
+            },
         }
     }
 }

@@ -56,7 +56,7 @@ Pattern: Pattern = {
 };
 
 PatternH: Pattern = {
-    <id:ID> <field:Pattern> =>  Pattern::SumVar(vec![id], Box::new(field)),
+    <id:ID> <field:Pattern> =>  Pattern::SumVar(id, Box::new(field)),
     Pattern,
 };
 
