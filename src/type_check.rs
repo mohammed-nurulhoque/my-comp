@@ -5,6 +5,7 @@ use ast::{
 use imper_ast::{
     Expr as E2,
     ValPath,
+    TypeDecl,
 };
 use types::{
     ProtoType,
@@ -15,24 +16,23 @@ use types::{
 use std::{
     ops::Deref,
     collections::HashMap,
-    rc::Rc,
     cell::{
         RefCell,
         Ref,
     },
 };
 
-type type_constraint = (Rc<Type>, Rc<Type>);
+type type_constraint = (Type, Type);
 
 enum NameInfo<'a> {
-    Direct(&'a (ValPath, Rc<Type>)),
-    Wrapped(Ref<'a, (ValPath, Rc<Type>)>),
+    Direct(&'a (ValPath, Type)),
+    Wrapped(Ref<'a, (ValPath, Type)>),
 }
 
 impl<'a> Deref for NameInfo<'a> {
-    type target = (ValPath, Rc<Type>);
+    type Target = (ValPath, Type);
 
-    fn deref(&self) -> &Self::target {
+    fn deref(&self) -> &Self::Target {
         match *self {
             NameInfo::Direct(reference) => &reference,
             NameInfo::Wrapped(reference) => &reference,
@@ -41,14 +41,14 @@ impl<'a> Deref for NameInfo<'a> {
 }
 
 pub struct Scope<'a> {
-    local: HashMap<String, (ValPath, Rc<Type>)>,
-    captures: RefCell<HashMap<&'a str, (usize, (ValPath, Rc<Type>))>>,
+    local: HashMap<String, (ValPath, Type)>,
+    captures: RefCell<HashMap<&'a str, (usize, (ValPath, Type))>>,
     next: Option<&'a Scope<'a>>,
 }
 
 impl<'a,'b> Scope<'a> where 'b: 'a {
-    fn insert(&mut self, name: String, path: ValPath, t: &Rc<Type>) {
-        self.local.insert(name, (path, Rc::clone(t)));
+    fn insert(&mut self, name: String, path: ValPath, t: &Type) {
+        self.local.insert(name, (path, t.clone()));
     }
 
      fn get(&self, name: &'b str) -> Option<NameInfo> {
@@ -63,15 +63,15 @@ impl<'a,'b> Scope<'a> where 'b: 'a {
 
         let mut node = self.next;
         let mut v = Vec::new();
-        let (path, t): (ValPath, Rc<Type>) = loop {
+        let (path, t): (ValPath, Type) = loop {
             if let None = node {
                 return None;
             }
             let val = node.unwrap();
             if let Some((path, t)) = val.local.get(name) {
-                break (path.clone(), Rc::clone(t));
+                break (path.clone(), t.clone());
             } else if let Some((_, (path, t))) = val.captures.borrow().get(&name) {
-                break (path.clone(), Rc::clone(t));
+                break (path.clone(), t.clone());
             }
             v.push(&val.captures);
             node = val.next;
@@ -79,23 +79,71 @@ impl<'a,'b> Scope<'a> where 'b: 'a {
 
         v.into_iter().map(|x| (x.borrow_mut(), x.borrow().len())).rev()
             .fold(path, |path, (mut hm, len)| {
-                hm.insert(name, (len, (path, Rc::clone(&t))));
+                hm.insert(name, (len, (path, t.clone())));
                 ValPath::Capture(vec![len])
             });
         self.get(name)
     }
 }
 
+fn gen2var(t: &Type, var: usize) -> Type {
+    match *t {
+        Type::Unit | Type::Int | Type::Bool | Type::String => *t,
+        Type::Constructor(ref t, n) => Type::Constructor(Box::new(gen2var(t, var)), n),
+        Type::Function(ref from, ref to) => Type::Function(Box::new(gen2var(from, var)),
+                                                           Box::new(gen2var(to, var))),
+        Type::Generic(n) => Type::Variable(var + n),
+        Type::Sum(n, t) => Type::Sum(n, Box::new(gen2var(&*t, var))),
+        Type::Tuple(v) => Type::Tuple(v.into_iter().map(|ref t| gen2var(t, var)).collect()),
+        Type::Variable(n) => *t,
+    }
+}
+
+fn to_type(t: ProtoType, 
+    map: &HashMap<String, usize>, conver: &mut HashMap<String, usize>) -> Type {
+    use self::ProtoType as P;
+    use self::Type as T;
+    match t {
+        P::Unit                 => T::Unit,
+        P::Int                  => T::Int,
+        P::Bool                 => T::Bool,
+        P::String               => T::String,
+        P::Tuple(v)             => T::Tuple(v.into_iter().map(|t| to_type(t, map, conver)).collect()),
+        P::Function(from, to)   => T::Function(Box::new(to_type(*from, map, conver)), 
+                                               Box::new(to_type(*to, map, conver))),
+        P::Generic(name)        => match conver.get(&name) {
+            Some(&n) => T::Generic(n),
+            None     => panic!("Error, generic not found"),
+        },
+        P::Sum(name, t)         => match map.get(&name) {
+            Some(&n) => T::Sum(n, Box::new(to_type(*t, map, conver))),
+            None     => panic!("should be error type not defined"),
+        },
+    }
+}
+
+fn get_type_decl(name: String, vars: Vec<String>, variants: Vec<(String, ProtoType)>, 
+    map: &mut HashMap<String, usize>) -> TypeDecl {
+    let conver: HashMap<String, usize> = vars.into_iter().enumerate().map(|(i, s)| (s, i)).collect();
+    map.insert(name, map.len());
+    TypeDecl {
+        name, num_generics: conver.len(), 
+        variants: variants.into_iter().map(|(s, t)| (s, to_type(t, map, &mut conver))).collect()
+    }
+}
+
 enum Error {
     MultBindPattern(String),
     ConstructorNotFound(String),
+    NonConstAppPattern(String),
+    TypeNotDefined(String),
 }
 
 impl Pattern {
     fn transform<'a> (self, 
         var: usize, next: usize,
         path: &mut Vec<usize>,
-        map: &mut HashMap<String, (ValPath, Rc<Type>)>,
+        map: &mut HashMap<String, (ValPath, Type)>,
         scope: &Scope<'a>,
         type_consts: &mut Vec<type_constraint>, 
         val_consts: &mut HashMap<ValPath, Literal>
@@ -109,15 +157,15 @@ impl Pattern {
                     Literal::Bool(_)    => Type::Bool,
                     Literal::String(_)  => Type::String,
                 };
-                type_consts.push((Rc::new(Type::Variable(var)), Rc::new(t)));
-                val_consts.insert(path.clone(), l);
+                type_consts.push((Type::Variable(var), t));
+                val_consts.insert(ValPath::Local(path.clone()), l);
                 Ok(())
             },
             Pattern::Bind(s) => {
-                match map.get(s) {
+                match map.get(&s) {
                     Some(_) => Err(Error::MultBindPattern(s)),
                     None => {
-                        map.insert(s, (ValPath::Local(path.clone()), Rc::new(Type::Variable(var))));
+                        map.insert(s, (ValPath::Local(path.clone()), Type::Variable(var)));
                         Ok(())
                     }
                 }
@@ -125,8 +173,8 @@ impl Pattern {
             Pattern::Tuple(v) => {
                 let len = v.len();
                 type_consts.push((
-                    Rc::new(Type::Variable(var)), 
-                    Rc::new(Type::Tuple((0..len).map(|i| Type::Variable(next + i)).collect()))
+                    Type::Variable(var), 
+                    Type::Tuple((0..len).map(|i| Type::Variable(next + i)).collect())
                 ));
                 v.into_iter().enumerate().map(|(i, pat)| {
                     path.push(i);
@@ -138,12 +186,16 @@ impl Pattern {
                 Ok(()) // FIXME
             },
             Pattern::SumVar(constructor, pat) => {
-                match scope.get(constructor) {
+                match scope.get(&constructor) {
                     None => Err(Error::ConstructorNotFound(constructor)),
-                    Some((_, t)) => { // fix <- not any type just constructor type
-                        type_consts.push((Rc::new(Type::Variable(var)), Rc::clone(t)));
-                        type_consts
-                        Ok(()) // FIXME
+                    Some(ni) => { // fix <- not any type just constructor type
+                        if let &Type::Constructor(..) = &*ni.1 {
+                            type_consts.push((Type::Variable(var), (&(*ni).1).clone()));
+                            // type_consts.push((Rc::new(Type::Variable(next)), ()))
+                            Ok(()) // FIXME
+                        } else {
+                            Err(Error::NonConstAppPattern(constructor))
+                        }
                     }
                 }
             },

@@ -1,5 +1,4 @@
 use {ast::*};
-use std::rc::Rc;
 use types::{ProtoType, Literal, BinOpcode, UnOpcode};
 grammar;
 
@@ -73,7 +72,7 @@ UnaryClass<Op, NextClass>: Expr = {
 
 Type: ProtoType = {
     <SimpleType>,
-    <from:SimpleType> "->" <to:Type> => ProtoType::Function(Rc::new(from), Rc::new(to)),
+    <from:SimpleType> "->" <to:Type> => ProtoType::Function(Box::new(from), Box::new(to)),
 };
 
 SimpleType: ProtoType = {
@@ -83,7 +82,7 @@ SimpleType: ProtoType = {
     "string" => ProtoType::String,
     "(" <Type> ")",
     <ID> => ProtoType::Generic(<>),
-    <name:ID> <tp:SimpleType> => ProtoType::Sum(name, Rc::new(tp)),
+    <name:ID> <tp:SimpleType> => ProtoType::Sum(name, Box::new(tp)),
     "(" <v:(<Type> ",")+> <t: Type> ")" => {
         let mut v = v;
         v.push(t);

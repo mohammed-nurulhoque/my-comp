@@ -1,22 +1,21 @@
-use std::rc::Rc;
-
 #[derive(Debug)]
 pub enum ProtoType {
     Unit,
     Int, Bool, String,
-    Function(Rc<ProtoType>, Rc<ProtoType>),
+    Function(Box<ProtoType>, Box<ProtoType>),
     Tuple(Vec<ProtoType>),
-    Sum(String, Rc<ProtoType>),
+    Sum(String, Box<ProtoType>),
     Generic(String),
 }
 
+#[derive(Clone)]
 pub enum Type {
     Unit,
     Int, Bool, String,
-    Constructor(Rc<Type>, usize),
-    Function(Rc<Type>, Rc<Type>),
+    Constructor(Box<Type>, usize),
+    Function(Box<Type>, Box<Type>),
     Tuple(Vec<Type>),
-    Sum(usize, Rc<Type>),
+    Sum(usize, Box<Type>),
     Generic(usize),
     Variable(usize),    // for type-checking
 }
