@@ -12,7 +12,6 @@ use types::{
     Type,
     Literal
 };
-
 use std::{
     ops::Deref,
     collections::HashMap,
@@ -42,16 +41,16 @@ impl<'a> Deref for NameInfo<'a> {
 
 pub struct Scope<'a> {
     local: HashMap<String, (ValPath, Type)>,
-    captures: RefCell<HashMap<&'a str, (usize, (ValPath, Type))>>,
+    captures: RefCell<HashMap<&'a str, (usize, (ValPath, &'a Type))>>,
     next: Option<&'a Scope<'a>>,
 }
 
 impl<'a,'b> Scope<'a> where 'b: 'a {
-    fn insert(&mut self, name: String, path: ValPath, t: &Type) {
-        self.local.insert(name, (path, t.clone()));
+    fn insert(&mut self, name: String, path: vec<usize>, t: Type) {
+        self.local.insert(name, (ValPath::Local(path), t));
     }
 
-     fn get(&self, name: &'b str) -> Option<NameInfo> {
+    fn get(&self, name: &'b str) -> Option<NameInfo> {
         if let Some(val) = self.local.get(name) {
             return Some(NameInfo::Direct(val));
         } else {
@@ -63,15 +62,15 @@ impl<'a,'b> Scope<'a> where 'b: 'a {
 
         let mut node = self.next;
         let mut v = Vec::new();
-        let (path, t): (ValPath, Type) = loop {
+        let (key, (path, t)): (&str, (ValPath, &Type)) = loop {
             if let None = node {
                 return None;
             }
             let val = node.unwrap();
-            if let Some((path, t)) = val.local.get(name) {
-                break (path.clone(), t.clone());
-            } else if let Some((_, (path, t))) = val.captures.borrow().get(&name) {
-                break (path.clone(), t.clone());
+            if let Some((key, (path, t))) = val.local.get_key_value(name) {
+                break (key, (path.clone(), t));
+            } else if let Some((key, (n, (_, t)))) = val.captures.borrow().get(&name) {
+                break (key, (ValPath::Capture(vec![*n]), t));
             }
             v.push(&val.captures);
             node = val.next;
@@ -79,7 +78,7 @@ impl<'a,'b> Scope<'a> where 'b: 'a {
 
         v.into_iter().map(|x| (x.borrow_mut(), x.borrow().len())).rev()
             .fold(path, |path, (mut hm, len)| {
-                hm.insert(name, (len, (path, t.clone())));
+                hm.insert(key, (len, (path, t)));
                 ValPath::Capture(vec![len])
             });
         self.get(name)
