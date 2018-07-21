@@ -12,12 +12,12 @@ pub enum ProtoType {
 pub enum Type {
     Unit,
     Int, Bool, String,
-    Constructor(Box<Type>, usize),
+    Constructor(Box<Type>, u16),
     Function(Box<Type>, Box<Type>),
     Tuple(Vec<Type>),
-    Sum(usize, Box<Type>),
-    Generic(usize),
-    Variable(usize),    // for type-checking
+    Sum(u16, Box<Type>),
+    Generic(u16),
+    Variable(u16),    // for type-checking
 }
 
 #[derive(PartialEq, Debug, Clone)]

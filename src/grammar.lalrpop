@@ -121,11 +121,7 @@ Term: Expr  = {
 
 Base: Expr = {
     <Literal> => Expr::Literal(<>),
-    <path:(<ID> ".")*> <bound:ID> => {
-        let mut path = path;
-        path.push(bound);
-        Expr::Bound(path)
-    },
+    <bound:ID> => Expr::Bound(bound),
     "(" <v:(<Expr> ",")+> <last:Expr> ")" => {
         let mut v = v;
         v.push(last);

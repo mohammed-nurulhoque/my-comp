@@ -17,11 +17,11 @@
 use std::collections::HashMap;
 use types::{Type, Literal, BinOpcode, UnOpcode};
 
-#[derive(Clone, Ord)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub enum ValPath {
-    Local(Vec<usize>),
-    Capture(Vec<usize>),
-    Static(Vec<usize>),
+    Local(Vec<u16>),
+    Capture(Vec<u16>),
+    Static(Vec<u16>),
 }
 
 pub struct TypeDecl {
