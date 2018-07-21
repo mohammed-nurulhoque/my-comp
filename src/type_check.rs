@@ -13,6 +13,7 @@ use types::{
     Literal
 };
 use std::{
+    cmp::max,
     ops::Deref,
     collections::HashMap,
     cell::{
@@ -33,24 +34,24 @@ impl<'a> Deref for NameInfo<'a> {
 
     fn deref(&self) -> &Self::Target {
         match *self {
-            NameInfo::Direct(reference) => &reference,
-            NameInfo::Wrapped(reference) => &reference,
+            NameInfo::Direct(reference) => reference,
+            NameInfo::Wrapped(ref reference) => &*reference,
         }
     }
 }
 
 pub struct Scope<'a> {
     local: HashMap<String, (ValPath, Type)>,
-    captures: RefCell<HashMap<&'a str, (usize, (ValPath, &'a Type))>>,
+    captures: RefCell<HashMap<&'a str, (u16, (ValPath, Type))>>,
     next: Option<&'a Scope<'a>>,
 }
 
-impl<'a,'b> Scope<'a> where 'b: 'a {
-    fn insert(&mut self, name: String, path: vec<usize>, t: Type) {
+impl<'a> Scope<'a> {
+    fn insert(&mut self, name: String, path: Vec<u16>, t: Type) {
         self.local.insert(name, (ValPath::Local(path), t));
     }
 
-    fn get(&self, name: &'b str) -> Option<NameInfo> {
+    fn get(&'a self, name: &str) -> Option<NameInfo> {
         if let Some(val) = self.local.get(name) {
             return Some(NameInfo::Direct(val));
         } else {
@@ -62,44 +63,61 @@ impl<'a,'b> Scope<'a> where 'b: 'a {
 
         let mut node = self.next;
         let mut v = Vec::new();
-        let (key, (path, t)): (&str, (ValPath, &Type)) = loop {
+        let (key, (path, t)): (&'a str, (ValPath, Type)) = loop {
             if let None = node {
                 return None;
             }
             let val = node.unwrap();
             if let Some((key, (path, t))) = val.local.get_key_value(name) {
-                break (key, (path.clone(), t));
-            } else if let Some((key, (n, (_, t)))) = val.captures.borrow().get(&name) {
-                break (key, (ValPath::Capture(vec![*n]), t));
+                break (key, (path.clone(), t.clone()));
+            } else {
+                if let Some((key, (n, (_, t)))) = val.captures.borrow().get_key_value(name) {
+                    break (key, (ValPath::Capture(vec![*n]), t.clone()));
+                }
             }
             v.push(&val.captures);
             node = val.next;
         };
 
-        v.into_iter().map(|x| (x.borrow_mut(), x.borrow().len())).rev()
+        v.into_iter().map(|x| (x.borrow_mut(), x.borrow().len() as u16)).rev()
             .fold(path, |path, (mut hm, len)| {
-                hm.insert(key, (len, (path, t)));
+                hm.insert(key, (len, (path, t.clone())));
                 ValPath::Capture(vec![len])
             });
         self.get(name)
     }
 }
 
-fn gen2var(t: &Type, var: usize) -> Type {
+fn gen2var(t: &Type, var: u16) -> (Type, u16) {
     match *t {
-        Type::Unit | Type::Int | Type::Bool | Type::String => *t,
-        Type::Constructor(ref t, n) => Type::Constructor(Box::new(gen2var(t, var)), n),
-        Type::Function(ref from, ref to) => Type::Function(Box::new(gen2var(from, var)),
-                                                           Box::new(gen2var(to, var))),
-        Type::Generic(n) => Type::Variable(var + n),
-        Type::Sum(n, t) => Type::Sum(n, Box::new(gen2var(&*t, var))),
-        Type::Tuple(v) => Type::Tuple(v.into_iter().map(|ref t| gen2var(t, var)).collect()),
-        Type::Variable(n) => *t,
+        Type::Unit | Type::Int | Type::Bool | Type::String => (t.clone(), var),
+        Type::Constructor(ref t, n) => {
+            let (t, next) = gen2var(t, var);
+            (Type::Constructor(Box::new(t), n), next)
+        },
+        Type::Function(ref from, ref to) => {
+            let (from, n1) = gen2var(from, var);
+            let (to, n2) = gen2var(to, var);
+            (Type::Function(Box::new(from), Box::new(to)), max(n1,n2))
+        },
+        Type::Generic(n) => (Type::Variable(var + n), var + n + 1),
+        Type::Sum(n, ref t) => {
+            let (t, n) = gen2var(&*t, var);
+            (Type::Sum(n, Box::new(t)), n)
+        },
+        Type::Tuple(ref v) => {
+            let (v, n): (Vec<Type>, Vec<u16>) = v.into_iter().map(|e| gen2var(e, var)).unzip();
+            let n = n.into_iter().fold(var, |acc, elem| max(acc, elem));
+            (Type::Tuple(v), n)
+        },
+        Type::Variable(n) => (t.clone(), var),
     }
 }
 
-fn to_type(t: ProtoType, 
-    map: &HashMap<String, usize>, conver: &mut HashMap<String, usize>) -> Type {
+fn to_type(t: ProtoType,
+    map: &HashMap<String, u16>, // map of type names -> index in types vector
+    conver: &HashMap<String, u16> // map of generics to variables
+) -> Type {
     use self::ProtoType as P;
     use self::Type as T;
     match t {
@@ -121,14 +139,17 @@ fn to_type(t: ProtoType,
     }
 }
 
-fn get_type_decl(name: String, vars: Vec<String>, variants: Vec<(String, ProtoType)>, 
-    map: &mut HashMap<String, usize>) -> TypeDecl {
-    let conver: HashMap<String, usize> = vars.into_iter().enumerate().map(|(i, s)| (s, i)).collect();
-    map.insert(name, map.len());
-    TypeDecl {
+fn get_type_decl(
+    name: String, vars: Vec<String>, variants: Vec<(String, ProtoType)>, 
+    map: &mut HashMap<String, u16>) -> TypeDecl {
+    let conver: HashMap<String, u16> = vars.into_iter().enumerate().map(|(i, s)| (s, i as u16)).collect();
+    let len = map.len() as u16;
+    map.insert(name.clone(), len);
+    let result = TypeDecl {
         name, num_generics: conver.len(), 
-        variants: variants.into_iter().map(|(s, t)| (s, to_type(t, map, &mut conver))).collect()
-    }
+        variants: variants.into_iter().map(|(s, t)| (s, to_type(t, map, &conver))).collect()
+    };
+    result
 }
 
 enum Error {
@@ -140,62 +161,59 @@ enum Error {
 
 impl Pattern {
     fn transform<'a> (self, 
-        var: usize, next: usize,
-        path: &mut Vec<usize>,
-        map: &mut HashMap<String, (ValPath, Type)>,
-        scope: &Scope<'a>,
+        var: u16, next: u16,
+        path: &mut Vec<u16>,
+        val_map: &mut HashMap<String, (ValPath, Type)>,
+        type_map: &Vec<TypeDecl>,
+        scope: &'a Scope<'a>,
         type_consts: &mut Vec<type_constraint>, 
-        val_consts: &mut HashMap<ValPath, Literal>
-    ) -> Result<(), Error> {
+        val_consts: &mut HashMap<ValPath, Literal>,
+        errors: Vec<Error>) {
         match self {
-            Pattern::Wild => Ok(()),
-            Pattern::Literal(Literal::Unit) => Ok(()),
+            Pattern::Wild => (),
             Pattern::Literal(l) => {
                 let t = match l {
+                    Literal::Unit       => Type::Unit,
                     Literal::Int(_)     => Type::Int,
                     Literal::Bool(_)    => Type::Bool,
                     Literal::String(_)  => Type::String,
                 };
                 type_consts.push((Type::Variable(var), t));
                 val_consts.insert(ValPath::Local(path.clone()), l);
-                Ok(())
             },
             Pattern::Bind(s) => {
-                match map.get(&s) {
-                    Some(_) => Err(Error::MultBindPattern(s)),
-                    None => {
-                        map.insert(s, (ValPath::Local(path.clone()), Type::Variable(var)));
-                        Ok(())
-                    }
+                match val_map.get(&s) {
+                    Some(_) => errors.push(Error::MultBindPattern(s)),
+                    None => {val_map.insert(s, (ValPath::Local(path.clone()), Type::Variable(var)));},
                 }
             },
             Pattern::Tuple(v) => {
-                let len = v.len();
+                let len = v.len() as u16;
                 type_consts.push((
                     Type::Variable(var), 
                     Type::Tuple((0..len).map(|i| Type::Variable(next + i)).collect())
                 ));
                 v.into_iter().enumerate().map(|(i, pat)| {
+                    let i = i as u16;
                     path.push(i);
-                    let result = pat.transform(next + i, next + len, path, map,
-                        scope, type_consts, val_consts);
+                    let result = pat.transform(next + i, next + len, path, val_map, type_map,
+                        scope, type_consts, val_consts,errors);
                     path.pop();
                     result
                 });
-                Ok(()) // FIXME
             },
-            Pattern::SumVar(constructor, pat) => {
-                match scope.get(&constructor) {
-                    None => Err(Error::ConstructorNotFound(constructor)),
-                    Some(ni) => { // fix <- not any type just constructor type
-                        if let &Type::Constructor(..) = &*ni.1 {
-                            type_consts.push((Type::Variable(var), (&(*ni).1).clone()));
-                            // type_consts.push((Rc::new(Type::Variable(next)), ()))
-                            Ok(()) // FIXME
-                        } else {
-                            Err(Error::NonConstAppPattern(constructor))
-                        }
-                    }
+            Pattern::SumVar(constructor, pat) => match scope.get(&constructor) {
+                None => {errors.push(Error::ConstructorNotFound(constructor));},
+                Some(ni) => if let Type::Constructor(ref t, n) = ni.1 {
+                        let (from, n1) = gen2var(t, next + 1);
+                        let (to, n2) = gen2var(&Type::Sum(n, (0..type_map[n as usize].num_generics).map(|n| Type::Generic(n)).collect()), next + 1);
+                        type_consts.push((Type::Variable(var), to));
+                        type_consts.push((Type::Variable(next), from));
+                        // path.push() // FIX, put order of const in type
+                        pat.transform(next, max(n1, n2), path, val_map, type_map, scope, type_consts, val_consts, errors);
+                        path.pop();
+                } else {
+                    errors.push(Error::NonConstAppPattern(constructor));
                 }
             },
         }

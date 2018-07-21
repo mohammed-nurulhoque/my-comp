@@ -26,7 +26,7 @@ pub enum ValPath {
 
 pub struct TypeDecl {
     pub name: String,
-    pub num_generics: usize,
+    pub num_generics: u16,
     pub variants: Vec<(String,Type)>,
 }
 

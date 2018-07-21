@@ -15,7 +15,7 @@ pub enum Type {
     Constructor(Box<Type>, u16),
     Function(Box<Type>, Box<Type>),
     Tuple(Vec<Type>),
-    Sum(u16, Box<Type>),
+    Sum(u16, Vec<Type>),
     Generic(u16),
     Variable(u16),    // for type-checking
 }
