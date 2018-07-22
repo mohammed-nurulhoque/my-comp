@@ -146,7 +146,7 @@ fn get_type_decl(
     let len = map.len() as u16;
     map.insert(name.clone(), len);
     let result = TypeDecl {
-        name, num_generics: conver.len(), 
+        name, num_generics: conver.len() as u16, 
         variants: variants.into_iter().map(|(s, t)| (s, to_type(t, map, &conver))).collect()
     };
     result
