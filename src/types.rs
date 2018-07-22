@@ -12,7 +12,7 @@ pub enum ProtoType {
 pub enum Type {
     Unit,
     Int, Bool, String,
-    Constructor(Box<Type>, u16),
+    Constructor { arg: Box<Type>, target: u16, position: u16 },
     Function(Box<Type>, Box<Type>),
     Tuple(Vec<Type>),
     Sum(u16, Vec<Type>),

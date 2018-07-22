@@ -91,9 +91,9 @@ impl<'a> Scope<'a> {
 fn gen2var(t: &Type, var: u16) -> (Type, u16) {
     match *t {
         Type::Unit | Type::Int | Type::Bool | Type::String => (t.clone(), var),
-        Type::Constructor(ref t, n) => {
-            let (t, next) = gen2var(t, var);
-            (Type::Constructor(Box::new(t), n), next)
+        Type::Constructor {ref arg, target, position} => {
+            let (arg, next) = gen2var(arg, var);
+            (Type::Constructor { arg: Box::new(arg), target, position }, next)
         },
         Type::Function(ref from, ref to) => {
             let (from, n1) = gen2var(from, var);
@@ -204,12 +204,12 @@ impl Pattern {
             },
             Pattern::SumVar(constructor, pat) => match scope.get(&constructor) {
                 None => {errors.push(Error::ConstructorNotFound(constructor));},
-                Some(ni) => if let Type::Constructor(ref t, n) = ni.1 {
-                        let (from, n1) = gen2var(t, next + 1);
-                        let (to, n2) = gen2var(&Type::Sum(n, (0..type_map[n as usize].num_generics).map(|n| Type::Generic(n)).collect()), next + 1);
+                Some(ni) => if let Type::Constructor { ref arg, target, position } = ni.1 {
+                        let (from, n1) = gen2var(arg, next + 1);
+                        let (to, n2) = gen2var(&Type::Sum(target, (0..type_map[target as usize].num_generics).map(|n| Type::Generic(n)).collect()), next + 1);
                         type_consts.push((Type::Variable(var), to));
                         type_consts.push((Type::Variable(next), from));
-                        // path.push() // FIX, put order of const in type
+                        path.push(position);
                         pat.transform(next, max(n1, n2), path, val_map, type_map, scope, type_consts, val_consts, errors);
                         path.pop();
                 } else {
@@ -220,76 +220,6 @@ impl Pattern {
     }
 }
 /*
-transform <- patterns in reverse
-Vec<Pattern> * Dtree * constrained set * int * Scope * Vec<int> * int * mut
-                        in dtree       ith pat         generic for each / next
--> Dtree * constrained set * int
-*/
-/*
-struct Map<'a> {
-    map: HashMap<String, Item<'a>>,
-    next: usize,
-}
-
-enum Item<'a> {
-    Name(Type, usize),
-    Namespace(&'a Map<'a>, NSType),
-}
-
-struct Scope<'a> {
-    map: Map<'a>,
-    parent: Option<&'a Scope<'a>>,
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum NSType { Module, Union }
-
-struct Constraint {
-    right:  Rc<Type>,
-    left:   Rc<Type>,
-}
-
-impl<'a> Map<'a> {
-    fn insert(&mut self, name: String, t: Type) -> (usize, Option<Item>) {
-        let prev = self.map.insert(name, Item::Name(t, self.next));
-        self.next += 1;
-        (self.next-1, prev)
-    }
-
-    fn get(&self, names: &[String]) -> Option<(&Type, usize, NSType)> {
-        use self::Item::*;
-        let mut names = names;
-        let mut ns = &self.map;
-        let mut nstype = NSType::Module;
-        loop {
-            match ns.get(&names[0]) {
-                None => return None,
-                Some(Name (t, n)) => return Some((t,*n, nstype)),
-                Some(Namespace(ns_, nstype_)) => {
-                    if *nstype_ == NSType::Union {
-                        nstype = *nstype_;
-                    }
-                    names = &names[1..];
-                    ns = &ns_.map;
-                },
-            }
-        }
-    }
-}
-
-impl<'a> Scope<'a> {
-    fn get(&self, names: &[String]) -> Option<(&Type, usize, NSType)> {
-        let result = self.map.get(names);
-        match result {
-            Some(_) => result,
-            None => {
-                if let Some(ns) = self.parent { ns.get(names) } 
-                else { None }
-            },
-        }
-    }
-}
-
 impl<'a,'b> P1 where 'b: 'a {
     fn transform(
         self, 
@@ -337,19 +267,6 @@ impl<'a,'b> P1 where 'b: 'a {
                 let (pat, next) = (*pattern).transform(names, consts, next, next + 1)?;
                 Ok((P2::SumVar(type_n, Box::new(pat)), next))
             },
-        }
-    }
-}
-
-impl E1 {
-    fn collect_constraints<'a>(&self,
-        names: &Scope<'a>,
-        consts: &mut Vec<Constraint>,
-        parent: usize, next: usize
-    ) -> (usize)
-    {
-        match *self {
-            _ => 0,
         }
     }
 }

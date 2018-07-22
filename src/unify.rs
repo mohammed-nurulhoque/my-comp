@@ -1,5 +1,4 @@
 use std::{
-    rc::Rc,
     collections::HashMap,
 };
 use types::Type;
@@ -8,7 +7,7 @@ impl Type {
     fn replace_type(&mut self, n: u16, target: &Type) {
         match *self {
             Type::Variable(m) if n == m => *self = target.clone(),
-            Type::Constructor(ref mut t, _) => t.replace_type(n, target),
+            Type::Constructor { arg: ref mut t, .. } => t.replace_type(n, target),
             Type::Function(ref mut from, ref mut to) => {
                 from.replace_type(n, target);
                 to.replace_type(n, target);
@@ -19,11 +18,20 @@ impl Type {
         }
     }
 
-    fn substitute_type(&self, map: HashMap<u16, Type>) -> &Type {
+    fn substitute_type(&mut self, map: HashMap<u16, Type>) {
         match *self {
-            Type::Variable(n) => if let Some(t) = map.get(n) {t.substitute_type(map)}
-                                 else {self}
-            
+            Type::Variable(n) => if let Some(t) = map.get(&n) {
+                *self = t.clone();
+                self.substitute_type(map)
+            },
+            Type::Constructor { arg: t, .. } => t.substitute_type(map),
+            Type::Function(ref mut from, ref mut to) => {
+                from.substitute_type(map);
+                to.substitute_type(map);
+            },
+            Type::Tuple(ref mut v) | Type::Sum(_, ref mut v) => {
+                v.into_iter().map(|t| t.substitute_type(map));
+            },
         }
     }
 }
@@ -49,7 +57,7 @@ fn unify(consts: Vec<(Type, Type)>) -> HashMap<u16, Type> {
             },
             (Type::Sum(n, s), Type::Sum(m, t)) if n == m => consts.push((s, t)),
             (Type::Generic(_), _) | (_, Type::Generic(_)) 
-            | (Type::Constructor(..), _) | (_, Type::Constructor(..)) => (), // FIXME, error unexpected
+            | (Type::Constructor {..}, _) | (_, Type::Constructor {..}) => (), // FIXME, error unexpected
             _ => (), // error type mismatch
         }
     }
@@ -57,9 +65,5 @@ fn unify(consts: Vec<(Type, Type)>) -> HashMap<u16, Type> {
 }
 
 fn substitute(v: Vec<&mut Type>, map: HashMap<u16, Type>) {
-    for t in v {
-        match *t {
-
-        }
-    }
+    v.into_iter().map(|t| t.substitute_type(map));
 }
