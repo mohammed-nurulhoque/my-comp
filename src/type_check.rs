@@ -1,9 +1,7 @@
 use ast::{
-    Expr as E1,
     Pattern,
 };
 use imper_ast::{
-    Expr as E2,
     ValPath,
     TypeDecl,
 };
@@ -22,9 +20,9 @@ use std::{
     },
 };
 
-type type_constraint = (Type, Type);
+type TypeConstraint = (Type, Type);
 
-enum NameInfo<'a> {
+pub enum NameInfo<'a> {
     Direct(&'a (ValPath, Type)),
     Wrapped(Ref<'a, (ValPath, Type)>),
 }
@@ -47,11 +45,11 @@ pub struct Scope<'a> {
 }
 
 impl<'a> Scope<'a> {
-    fn insert(&mut self, name: String, path: Vec<u16>, t: Type) {
+    pub fn insert(&mut self, name: String, path: Vec<u16>, t: Type) {
         self.local.insert(name, (ValPath::Local(path), t));
     }
 
-    fn get(&'a self, name: &str) -> Option<NameInfo> {
+    pub fn get(&'a self, name: &str) -> Option<NameInfo> {
         if let Some(val) = self.local.get(name) {
             return Some(NameInfo::Direct(val));
         } else {
@@ -102,19 +100,19 @@ fn gen2var(t: &Type, var: u16) -> (Type, u16) {
         },
         Type::Generic(n) => (Type::Variable(var + n), var + n + 1),
         Type::Sum(n, ref t) => {
-            let (t, n) = gen2var(&*t, var);
-            (Type::Sum(n, Box::new(t)), n)
+            let (t, next) = gen2var(&*t, var);
+            (Type::Sum(n, Box::new(t)), next)
         },
         Type::Tuple(ref v) => {
             let (v, n): (Vec<Type>, Vec<u16>) = v.into_iter().map(|e| gen2var(e, var)).unzip();
             let n = n.into_iter().fold(var, |acc, elem| max(acc, elem));
             (Type::Tuple(v), n)
         },
-        Type::Variable(n) => (t.clone(), var),
+        Type::Variable(_) => (t.clone(), var),
     }
 }
 
-fn to_type(t: ProtoType,
+pub fn to_type(t: ProtoType,
     map: &HashMap<String, u16>, // map of type names -> index in types vector
     conver: &HashMap<String, u16> // map of generics to variables
 ) -> Type {
@@ -139,7 +137,7 @@ fn to_type(t: ProtoType,
     }
 }
 
-fn get_type_decl(
+pub fn get_type_decl(
     name: String, vars: Vec<String>, variants: Vec<(String, ProtoType)>, 
     map: &mut HashMap<String, u16>) -> TypeDecl {
     let conver: HashMap<String, u16> = vars.into_iter().enumerate().map(|(i, s)| (s, i as u16)).collect();
@@ -152,7 +150,7 @@ fn get_type_decl(
     result
 }
 
-enum Error {
+pub enum Error {
     MultBindPattern(String),
     ConstructorNotFound(String),
     NonConstAppPattern(String),
@@ -160,15 +158,15 @@ enum Error {
 }
 
 impl Pattern {
-    fn transform<'a> (self, 
+    pub fn transform<'a> (self, 
         var: u16, next: u16,
         path: &mut Vec<u16>,
         val_map: &mut HashMap<String, (ValPath, Type)>,
         type_map: &Vec<TypeDecl>,
         scope: &'a Scope<'a>,
-        type_consts: &mut Vec<type_constraint>, 
+        type_consts: &mut Vec<TypeConstraint>, 
         val_consts: &mut HashMap<ValPath, Literal>,
-        errors: Vec<Error>) {
+        errors: &mut Vec<Error>) {
         match self {
             Pattern::Wild => (),
             Pattern::Literal(l) => {
@@ -193,20 +191,22 @@ impl Pattern {
                     Type::Variable(var), 
                     Type::Tuple((0..len).map(|i| Type::Variable(next + i)).collect())
                 ));
-                v.into_iter().enumerate().map(|(i, pat)| {
+                for (i, pat) in v.into_iter().enumerate() {
                     let i = i as u16;
                     path.push(i);
-                    let result = pat.transform(next + i, next + len, path, val_map, type_map,
-                        scope, type_consts, val_consts,errors);
+                    pat.transform(next + i, next + len, path, val_map, type_map,
+                        scope, type_consts, val_consts, errors);
                     path.pop();
-                    result
-                });
+                }
             },
             Pattern::SumVar(constructor, pat) => match scope.get(&constructor) {
                 None => {errors.push(Error::ConstructorNotFound(constructor));},
                 Some(ni) => if let Type::Constructor { ref arg, target, position } = ni.1 {
                         let (from, n1) = gen2var(arg, next + 1);
-                        let (to, n2) = gen2var(&Type::Sum(target, (0..type_map[target as usize].num_generics).map(|n| Type::Generic(n)).collect()), next + 1);
+                        let (to, n2) = gen2var(&Type::Sum(target, 
+                            Box::new(Type::Tuple((0..type_map[target as usize].num_generics)
+                            .map(|n| Type::Generic(n)).collect()))),
+                            next + 1);
                         type_consts.push((Type::Variable(var), to));
                         type_consts.push((Type::Variable(next), from));
                         path.push(position);
