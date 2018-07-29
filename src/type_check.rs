@@ -1,11 +1,17 @@
 use ast::{
+    Expr,
     Pattern,
 };
 use imper_ast::{
+    Expr as iExpr,
+    Closure,
     ValPath,
     TypeDecl,
 };
+use dtree::DTree;
 use types::{
+    BinOpcode,
+    UnOpcode,
     ProtoType,
     Type,
     Literal
@@ -139,15 +145,22 @@ pub fn to_type(t: ProtoType,
 
 pub fn get_type_decl(
     name: String, vars: Vec<String>, variants: Vec<(String, ProtoType)>, 
-    map: &mut HashMap<String, u16>) -> TypeDecl {
+    type_map: &mut HashMap<String, u16>, 
+    val_map: &mut HashMap<String, (ValPath, Type)>,
+) -> TypeDecl {
     let conver: HashMap<String, u16> = vars.into_iter().enumerate().map(|(i, s)| (s, i as u16)).collect();
-    let len = map.len() as u16;
-    map.insert(name.clone(), len);
-    let result = TypeDecl {
+    let len = type_map.len() as u16;
+    type_map.insert(name.clone(), len);
+    TypeDecl {
         name, num_generics: conver.len() as u16, 
-        variants: variants.into_iter().map(|(s, t)| (s, to_type(t, map, &conver))).collect()
-    };
-    result
+        variants: variants.into_iter().enumerate().map(|(i, (s, t))| {
+            let t = to_type(t, type_map, &conver);
+            val_map.insert(s.clone(), (ValPath::Constructor, Type::Constructor{
+                arg: Box::new(t.clone()), target: conver.len() as u16, position: (i + 1) as u16
+            }));
+            (s, t)
+        }).collect()
+    }
 }
 
 pub enum Error {
@@ -170,13 +183,7 @@ impl Pattern {
         match self {
             Pattern::Wild => (),
             Pattern::Literal(l) => {
-                let t = match l {
-                    Literal::Unit       => Type::Unit,
-                    Literal::Int(_)     => Type::Int,
-                    Literal::Bool(_)    => Type::Bool,
-                    Literal::String(_)  => Type::String,
-                };
-                type_consts.push((Type::Variable(var), t));
+                type_consts.push((Type::Variable(var), l.get_type()));
                 val_consts.insert(ValPath::Local(path.clone()), l);
             },
             Pattern::Bind(s) => {
@@ -202,6 +209,9 @@ impl Pattern {
             Pattern::SumVar(constructor, pat) => match scope.get(&constructor) {
                 None => {errors.push(Error::ConstructorNotFound(constructor));},
                 Some(ni) => if let Type::Constructor { ref arg, target, position } = ni.1 {
+
+                        //val_Consts!!
+
                         let (from, n1) = gen2var(arg, next + 1);
                         let (to, n2) = gen2var(&Type::Sum(target, 
                             Box::new(Type::Tuple((0..type_map[target as usize].num_generics)
@@ -219,6 +229,115 @@ impl Pattern {
         }
     }
 }
+
+impl Expr {
+    pub fn transform<'a>(self,
+    var: u16, next: u16,
+        type_map: &Vec<TypeDecl>,
+        type_refs: Vec<*mut Type>,
+        scope: &'a Scope<'a>,
+        type_consts: &mut Vec<TypeConstraint>,
+        errors: Vec<Error>,
+    ) -> (iExpr, u16) {
+        match self {
+            Expr::Literal(l) => {
+                type_consts.push((Type::Variable(var), l.get_type()));
+                (iExpr::Literal(l), next)
+            },
+            Expr::Bound(s) => match scope.get(&s) {
+                Some(ni) => {
+                    let (path , t) = &* ni;
+                    let t = t.clone();
+                    type_refs.push(&mut t);
+                    (iExpr::Bound(path.clone(), t), next)
+                },
+                None => panic!("error"),
+            },
+            Expr::BinOp(e1, op, e2) => {
+                use self::BinOpcode::*;
+                let (e1, e2, next) = match op {
+                    Add | Sub | Mul | Div | Mod => {
+                        type_consts.push((Type::Variable(var), Type::Int));
+                        type_consts.push((Type::Variable(next), Type::Int));
+                        let (e1, nnext) = e1.transform(next, next + 1, type_map, type_refs, scope, type_consts, errors);
+                        let (e2, nnnext) = e2.transform(next, nnext, type_map, type_refs, scope, type_consts, errors);
+                        (e1, e2, nnnext)
+                    },
+                    Greater | Less | GreaterEq | LessEq => {
+                        type_consts.push((Type::Variable(var), Type::Bool));
+                        type_consts.push((Type::Variable(next), Type::Int));
+                        let (e1, nnext) = e1.transform(next, next + 1, type_map, type_refs, scope, type_consts, errors);
+                        let (e2, nnnext) = e2.transform(next, nnext, type_map, type_refs, scope, type_consts, errors);
+                        (e1, e2, nnnext)
+                    },
+                    Equal | NotEq => {
+                        type_consts.push((Type::Variable(var), Type::Bool));
+                        let (e1, nnext) = e1.transform(next, next + 1, type_map, type_refs, scope, type_consts, errors);
+                        let (e2, nnnext) = e2.transform(next, nnext, type_map, type_refs, scope, type_consts, errors);
+                        (e1, e2, nnnext)
+                    },
+                    And | Or => {
+                        type_consts.push((Type::Variable(var), Type::Bool));
+                        type_consts.push((Type::Variable(next), Type::Bool));
+                        let (e1, nnext) = e1.transform(next, next + 1, type_map, type_refs, scope, type_consts, errors);
+                        let (e2, nnnext) = e2.transform(next, nnext, type_map, type_refs, scope, type_consts, errors);
+                        (e1, e2, nnnext)
+                    }
+                };
+                (iExpr::BinOp(Box::new(e1), op, Box::new(e2)), next)
+            },
+            Expr::UnOp(UnOpcode::Minus, e) => {
+                type_consts.push((Type::Variable(var), Type::Int));
+                let (e, next) = e.transform(var, next, type_map, type_refs, scope, type_consts, errors);
+                (iExpr::UnOp(UnOpcode::Minus, Box::new(e)), next)
+            },
+            Expr::UnOp(UnOpcode::Not, e) => {
+                type_consts.push((Type::Variable(var), Type::Bool));
+                let (e, next) = e.transform(var, next, type_map, type_refs, scope, type_consts, errors);
+                (iExpr::UnOp(UnOpcode::Minus, Box::new(e)), next)
+            },
+            Expr::Tuple(v) => {
+                let V = Vec::new();
+                let mut nnext = next + v.len() as u16;
+                type_consts.push((Type::Variable(var), 
+                    Type::Tuple((0..v.len()).map(|i| Type::Variable(next + i as u16)).collect())));
+                for (i, e) in v.iter().enumerate() {
+                    let (e, next) = e.transform(next + i as u16, nnext, type_map, type_refs, scope, type_consts, errors);
+                    V.push(e);
+                    nnext = next;
+                }
+                (iExpr::Tuple(V), nnext)
+            },
+            Expr::Application(e1, e2) => {
+                type_consts.push((Type::Variable(next), 
+                    Type::Function(Box::new(Type::Variable(next + 1)),
+                    Box::new(Type::Variable(var)))));
+                let (e1, nnext) = e1.transform(next, next + 1, type_map, type_refs, scope, type_consts, errors);
+                let (e2, nnnext) = e2.transform(next, nnext, type_map, type_refs, scope, type_consts, errors);
+                (iExpr::Application(Box::new(e1), Box::new(e2)), nnnext)
+            },
+            Expr::Conditional(cond, e1, e2) => {
+                type_consts.push((Type::Variable(next), Type::Bool));
+                let (cond, nnext) = e1.transform(next, next + 1, type_map, type_refs, scope, type_consts, errors);
+                let (e1, nnext) = e1.transform(var, nnext, type_map, type_refs, scope, type_consts, errors);
+                let (e2, nnext) = e2.transform(var, nnext, type_map, type_refs, scope, type_consts, errors);
+                (iExpr::Conditional(Box::new(cond), Box::new(e1), Box::new(e2)), nnext)
+            },
+            Expr::Function(v) => {
+
+                (iExpr::Closure(Closure {
+                    captures: vec![],
+                    args: vec![],
+                    return_type: Type::Unit,
+                    DTree: panic!(""),
+                    function: vec![],
+                }), next)
+            }
+            _ => panic!("remove"),
+        }
+    }
+}
+
 /*
 impl<'a,'b> P1 where 'b: 'a {
     fn transform(
