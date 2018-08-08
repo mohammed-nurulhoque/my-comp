@@ -12,7 +12,14 @@ pub enum ProtoType {
 pub enum Type {
     Unit,
     Int, Bool, String,
-    Constructor { arg: Box<Type>, target: u16, position: u16 },
+    Constructor {
+        /// the input to the constructor
+        arg: Box<Type>,
+        /// target type in a global types vector
+        target: u16,
+        /// sposition among the constructors of the same type
+        position: u16
+    },
     Function(Box<Type>, Box<Type>),
     Tuple(Vec<Type>),
     Sum(u16, Box<Type>),

@@ -21,9 +21,9 @@ use types::{Type, Literal, BinOpcode, UnOpcode};
 pub enum ValPath {
     Local(Vec<u16>),
     Capture(Vec<u16>),
-    Static(Vec<u16>),
+    StaticVal(Vec<u16>),
+    StaticFn(u16),
     Constructor,
-    Recurse,
 }
 
 pub struct TypeDecl {
@@ -33,11 +33,11 @@ pub struct TypeDecl {
 }
 
 pub struct Closure {
-    pub captures: Vec<(Vec<usize>, Type)>,
+    pub captures: Vec<(ValPath, Type)>,
     pub args: Vec<Type>,
     pub return_type: Type,
-    pub DTree: DTree,
-    pub function: Vec<Expr>,
+    pub dtree: DTree,
+    pub branches: Vec<Expr>,
 }
 
 pub enum Expr {
@@ -52,4 +52,6 @@ pub enum Expr {
     Application(Box<Expr>, Box<Expr>),
 
     Conditional(Box<Expr>, Box<Expr>, Box<Expr>),
+
+    Error,
 }
