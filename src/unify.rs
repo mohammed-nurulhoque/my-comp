@@ -70,8 +70,8 @@ pub fn unify(mut consts: Vec<(Type, Type)>) -> HashMap<u16, Type> {
     map
 }
 
-pub fn substitute(v: Vec<&mut Type>, mut map: HashMap<u16, Type>) {
+pub fn substitute(v: Vec<*mut Type>, mut map: HashMap<u16, Type>) {
     for t in v {
-        t.substitute_type(&mut map);
+        (*t).substitute_type(&mut map);
     }
 }

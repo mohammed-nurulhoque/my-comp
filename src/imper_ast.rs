@@ -14,8 +14,17 @@
 //! v1: HashSet<(String,Type,usize)>: Constructor name from type to ith type
 //! v2: Vec<(String, Expr, Type)>: exported values
 
+use std::collections::HashMap;
 use dtree::DTree;
 use types::{Type, Literal, BinOpcode, UnOpcode};
+
+pub struct Module {
+    pub static_funcs: Vec<(String, Closure)>,
+    pub anon_funcs: Vec<Closure>,
+    pub globals_types: Vec<Type>,
+    pub globals_names: HashMap<String, ValPath>,
+    pub type_decls: Vec<TypeDecl>,
+}
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ValPath {
@@ -42,13 +51,13 @@ pub struct Closure {
 
 pub enum Expr {
     Literal(Literal),
-    Bound(ValPath, Type),
+    Bound(ValPath),
     Tuple(Vec<Expr>),
 
     BinOp(Box<Expr>, BinOpcode, Box<Expr>),
     UnOp(UnOpcode, Box<Expr>),
 
-    Closure(Closure),
+    Closure(u16),
     Application(Box<Expr>, Box<Expr>),
 
     Conditional(Box<Expr>, Box<Expr>, Box<Expr>),

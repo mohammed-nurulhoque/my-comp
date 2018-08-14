@@ -11,6 +11,7 @@ use imper_ast::{
 use dtree::{
     WrappedTree,
 };
+use unify;
 use types::{
     BinOpcode,
     UnOpcode,
@@ -73,11 +74,6 @@ pub enum ConstraintValue {
 }
 
 impl<'a,'b> Scope<'a,'b> {
-    /// insert a local name
-    pub fn insert(&mut self, name: String, path: Vec<u16>, t: Type) {
-        self.local.insert(name, (ValPath::Local(path), t));
-    }
-
     /// get name from scope, if name not found in the current scope
     /// fills captures in all parent scopes until the containing scope
     pub fn get(&self, name: &str) -> Option<NameInfo> {
@@ -221,9 +217,10 @@ impl Literal {
 }
 
 impl Pattern {
-    pub fn transform<'a,'b> (self, 
+    pub fn transform<'a,'b, T: Fn(Vec<u16>) -> ValPath + Copy> (self, 
         var: u16, next: u16,
         path: &mut Vec<u16>,
+        fn2val_path: T,
         type_map: &Vec<TypeDecl>,
         local: &mut HashMap<String, (ValPath, Type)>,
         scope: &Scope<'a,'b>,
@@ -236,7 +233,7 @@ impl Pattern {
                 type_consts.push((Type::Variable(var), l.get_type()));
                 if let Literal::Unit = l { () }
                 else {
-                    val_consts.insert(ValPath::Local(path.clone()), l.get_constraint());
+                    val_consts.insert(fn2val_path(path.clone()), l.get_constraint());
                 }
                 next
             },
@@ -244,7 +241,7 @@ impl Pattern {
                 match scope.local.get(&s) {
                     Some(_) => { errors.push(Error::MultBindPattern(s)); next },
                     None => {
-                        local.insert(s, (ValPath::Local(path.clone()), Type::Variable(var)));
+                        local.insert(s, (fn2val_path(path.clone()), Type::Variable(var)));
                         next
                     },
                 }
@@ -259,7 +256,7 @@ impl Pattern {
                 for (i, pat) in v.into_iter().enumerate() {
                     let i = i as u16;
                     path.push(i);
-                    nnext = pat.transform(next + i, nnext, path, type_map,
+                    nnext = pat.transform(next + i, nnext, path, fn2val_path, type_map,
                         local, scope, type_consts, val_consts, errors);
                     path.pop();
                 }
@@ -268,11 +265,9 @@ impl Pattern {
             Pattern::SumVar(constructor, pat) => match scope.get(&constructor) {
                 None => { errors.push(Error::ConstructorNotFound(constructor)); next },
                 Some(ni) => if let Type::Constructor { ref arg, target, position } = ni.1 {
-
-                        //val_Consts
                         path.push(0);
                         let t = &type_map[target as usize];
-                        val_consts.insert(ValPath::Local(path.clone()), 
+                        val_consts.insert(fn2val_path(path.clone()), 
                             ConstraintValue::Finite(position, t.variants.len() as u16));
 
                         let (from, n1) = gen2var(arg, next + 1);
@@ -282,7 +277,7 @@ impl Pattern {
                         type_consts.push((Type::Variable(var), to));
                         type_consts.push((Type::Variable(next), from));
                         path.push(position);
-                        let next = pat.transform(next, max(n1, n2), path, type_map, 
+                        let next = pat.transform(next, max(n1, n2), path, fn2val_path, type_map, 
                             local, scope, type_consts, val_consts, errors);
                         path.pop();
                         next
@@ -321,9 +316,8 @@ impl Expr {
             Expr::Bound(s) => match scope.get(&s) {
                 Some(ni) => {
                     let (path , t) = &* ni;
-                    let mut t = t.clone();
-                    type_refs.push(&mut t);
-                    (iExpr::Bound(path.clone(), t), next)
+                    type_consts.push((Type::Variable(var), t));
+                    (iExpr::Bound(path.clone()), next)
                 },
                 None => { errors.push(Error::NameNotFound(s)); (iExpr::Error, next) },
             },
@@ -429,7 +423,7 @@ fn fn_transform<'a,'b>(
         let mut local = HashMap::new();
         for (j, pat) in pats.into_iter().enumerate() {
             path.push(j as u16);
-            pat.transform(next + j as u16, nnext, &mut path, type_map, &mut local, scope, type_consts, &mut val_consts, errors);
+            pat.transform(next + j as u16, nnext, &mut path, ValPath::Local, type_map, &mut local, scope, type_consts, &mut val_consts, errors);
             path.pop();
         }
         wrapped.add_pattern(val_consts, i as u16);
@@ -460,4 +454,23 @@ fn fn_transform<'a,'b>(
     }
 
     (result, nnext)
+}
+pub fn binding_transform<'a,'b>(
+    order: u16,
+    pat: Pattern, exp: Expr,
+    type_map: &Vec<TypeDecl>,
+    scope: &mut Scope<'a,'b>,
+    errors: &mut Vec<Error>,
+) {
+    let mut path = vec![order];
+    let mut local = HashMap::new();
+    let mut type_consts = Vec::new();
+    let mut type_refs = Vec::new();
+    let mut val_consts = BTreeMap::new();
+    let next = pat.transform(0, 1, &mut path, ValPath::StaticVal, type_map, &mut local, scope,
+                             &mut type_consts, &mut val_consts, errors);
+    let (exp, next) = exp.transform(0, next, type_map, &mut type_refs, scope, &mut type_consts, errors);
+    let map = unify::unify(type_consts);
+    unify::substitute(type_refs, map);
+    scope.local.extend(local);
 }
