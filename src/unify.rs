@@ -19,7 +19,7 @@ impl Type {
         }
     }
 
-    fn substitute_type(&mut self, map: &mut HashMap<u16, Type>) {
+    pub fn substitute_type(&mut self, map: &HashMap<u16, Type>) {
         match *self {
             Type::Variable(n) => if map.get(&n).is_some() {
                 *self = map.get(&n).unwrap().clone();
@@ -68,10 +68,4 @@ pub fn unify(mut consts: Vec<(Type, Type)>) -> HashMap<u16, Type> {
         }
     }
     map
-}
-
-pub fn substitute(v: Vec<*mut Type>, mut map: HashMap<u16, Type>) {
-    for t in v {
-        (*t).substitute_type(&mut map);
-    }
 }

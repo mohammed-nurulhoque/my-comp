@@ -7,6 +7,7 @@ use imper_ast::{
     Closure,
     ValPath,
     TypeDecl,
+    ConstraintValue,
 };
 use dtree::{
     WrappedTree,
@@ -35,6 +36,13 @@ use std::{
 
 type TypeConstraint = (Type, Type);
 
+pub struct Args<'a,'b,'c,'d,'e> where 'b: 'c {
+    type_map: &'a Vec<TypeDecl>,
+    scope: &'c Scope<'b,'c>,
+    type_consts: &'d mut Vec<TypeConstraint>, 
+    errors: &'e mut Vec<Error>,
+}
+
 /// A reference to the info about a name in a scope
 pub enum NameInfo<'a> {
     Direct(&'a (ValPath, Type)),
@@ -59,18 +67,6 @@ pub struct Scope<'a,'b> where 'a: 'b {
     captures: RefCell<HashMap<&'a str, (u16, (ValPath, Type))>>,
     /// reference to the next enclosing scope
     next: Option<&'b Scope<'a,'b>>,
-}
-
-/// A pattern is a set of constraints on a value, which are categorized as follows
-#[derive(PartialEq, Eq, Hash, Clone)]
-pub enum ConstraintValue {
-    /// nth option out of x finitely many option, includes Booleans and union tags
-    Finite(u16, u16),
-    /// integer constraint which is technically finite but represented sparsely, so
-    /// is practically inifinite
-    Int(isize),
-    /// string constraint, we allow strings in pattern matching
-    Str(String),
 }
 
 impl<'a,'b> Scope<'a,'b> {
@@ -217,20 +213,18 @@ impl Literal {
 }
 
 impl Pattern {
-    pub fn transform<'a,'b, T: Fn(Vec<u16>) -> ValPath + Copy> (self, 
+    pub fn transform<'a,'b,'c,'d,'e, T: Fn(Vec<u16>) -> ValPath + Copy> (self, 
         var: u16, next: u16,
         path: &mut Vec<u16>,
+        args: &mut Args<'a,'b,'c,'d,'e>,
         fn2val_path: T,
-        type_map: &Vec<TypeDecl>,
         local: &mut HashMap<String, (ValPath, Type)>,
-        scope: &Scope<'a,'b>,
-        type_consts: &mut Vec<TypeConstraint>, 
         val_consts: &mut BTreeMap<ValPath, ConstraintValue>,
-        errors: &mut Vec<Error>) -> u16 {
+    ) -> u16 {
         match self {
             Pattern::Wild => next,
             Pattern::Literal(l) => {
-                type_consts.push((Type::Variable(var), l.get_type()));
+                args.type_consts.push((Type::Variable(var), l.get_type()));
                 if let Literal::Unit = l { () }
                 else {
                     val_consts.insert(fn2val_path(path.clone()), l.get_constraint());
@@ -238,8 +232,8 @@ impl Pattern {
                 next
             },
             Pattern::Bind(s) => {
-                match scope.local.get(&s) {
-                    Some(_) => { errors.push(Error::MultBindPattern(s)); next },
+                match args.scope.local.get(&s) {
+                    Some(_) => { args.errors.push(Error::MultBindPattern(s)); next },
                     None => {
                         local.insert(s, (fn2val_path(path.clone()), Type::Variable(var)));
                         next
@@ -249,24 +243,23 @@ impl Pattern {
             Pattern::Tuple(v) => {
                 let len = v.len() as u16;
                 let mut nnext = next + len;
-                type_consts.push((
+                args.type_consts.push((
                     Type::Variable(var), 
                     Type::Tuple((next..nnext).map(|i| Type::Variable(i)).collect())
                 ));
                 for (i, pat) in v.into_iter().enumerate() {
                     let i = i as u16;
                     path.push(i);
-                    nnext = pat.transform(next + i, nnext, path, fn2val_path, type_map,
-                        local, scope, type_consts, val_consts, errors);
+                    nnext = pat.transform(next + i, nnext, path, args, fn2val_path, local, val_consts);
                     path.pop();
                 }
                 nnext
             },
-            Pattern::SumVar(constructor, pat) => match scope.get(&constructor) {
-                None => { errors.push(Error::ConstructorNotFound(constructor)); next },
+            Pattern::SumVar(constructor, pat) => match args.scope.get(&constructor) {
+                None => { args.errors.push(Error::ConstructorNotFound(constructor)); next },
                 Some(ni) => if let Type::Constructor { ref arg, target, position } = ni.1 {
                         path.push(0);
-                        let t = &type_map[target as usize];
+                        let t = &args.type_map[target as usize];
                         val_consts.insert(fn2val_path(path.clone()), 
                             ConstraintValue::Finite(position, t.variants.len() as u16));
 
@@ -274,15 +267,14 @@ impl Pattern {
                         let (to, n2) = (Type::Sum(target, 
                             Box::new(Type::Tuple((0..t.num_generics).map(|n| Type::Variable(next + 1 + n)).collect()))),
                             next + 1 + t.num_generics);
-                        type_consts.push((Type::Variable(var), to));
-                        type_consts.push((Type::Variable(next), from));
+                        args.type_consts.push((Type::Variable(var), to));
+                        args.type_consts.push((Type::Variable(next), from));
                         path.push(position);
-                        let next = pat.transform(next, max(n1, n2), path, fn2val_path, type_map, 
-                            local, scope, type_consts, val_consts, errors);
+                        let next = pat.transform(next, max(n1, n2), path, args, fn2val_path, local, val_consts);
                         path.pop();
                         next
                 } else {
-                    errors.push(Error::NonConstAppPattern(constructor));
+                    args.errors.push(Error::NonConstAppPattern(constructor));
                     next
                 }
             },
@@ -291,103 +283,100 @@ impl Pattern {
 }
 
 impl Expr {
-    pub fn transform<'a,'b>(self,
+    pub fn transform<'a,'b,'c,'d,'e>(self,
         var: u16, next: u16,
-        type_map: &Vec<TypeDecl>,
-        type_refs: &mut Vec<*mut Type>,
-        scope: &'b Scope<'a,'b>,
-        type_consts: &mut Vec<TypeConstraint>,
-        errors: &mut Vec<Error>,
+        args: &mut Args<'a,'b,'c,'d,'e>,
+        anon_funcs: &mut Vec<Closure>,
     ) -> (iExpr, u16) {
-        let sequence = |e1: Expr, e2: Expr, var1, var2, next,
-            type_refs: &mut Vec<*mut Type>,
-            type_consts: &mut Vec<TypeConstraint>,
-            errors: &mut Vec<Error>| 
-        {
-            let (e1, next) = e1.transform(var1, next, type_map, type_refs, scope, type_consts, errors);
-            let (e2, next) = e2.transform(var2, next, type_map, type_refs, scope, type_consts, errors);
+        let sequence = 
+        | e1: Expr, e2: Expr, var1, var2, next, 
+          args: &mut Args<'a,'b,'c,'d,'e>, anon_funcs: &mut Vec<Closure>,
+        | {
+            let (e1, next) = e1.transform(var1, next, args, anon_funcs);
+            let (e2, next) = e2.transform(var2, next, args, anon_funcs);
             (e1, e2, next)
         };
         match self {
             Expr::Literal(l) => {
-                type_consts.push((Type::Variable(var), l.get_type()));
+                args.type_consts.push((Type::Variable(var), l.get_type()));
                 (iExpr::Literal(l), next)
             },
-            Expr::Bound(s) => match scope.get(&s) {
+            Expr::Bound(s) => match args.scope.get(&s) {
                 Some(ni) => {
                     let (path , t) = &* ni;
-                    type_consts.push((Type::Variable(var), t));
+                    args.type_consts.push((Type::Variable(var), t.clone()));
                     (iExpr::Bound(path.clone()), next)
                 },
-                None => { errors.push(Error::NameNotFound(s)); (iExpr::Error, next) },
+                None => { args.errors.push(Error::NameNotFound(s)); (iExpr::Error, next) },
             },
             Expr::BinOp(e1, op, e2) => {
                 use self::BinOpcode::*;
                 let (e1, e2, next) = match op {
                     Add | Sub | Mul | Div | Mod => {
-                        type_consts.push((Type::Variable(var), Type::Int));
-                        sequence(*e1, *e2, var, var, next,type_refs,  type_consts, errors)
+                        args.type_consts.push((Type::Variable(var), Type::Int));
+                        sequence(*e1, *e2, var, var, next, args, anon_funcs)
                     },
                     Greater | Less | GreaterEq | LessEq => {
-                        type_consts.push((Type::Variable(var), Type::Bool));
-                        type_consts.push((Type::Variable(next), Type::Int));
-                        sequence(*e1, *e2, next, next, next + 1,type_refs, type_consts, errors)
+                        args.type_consts.push((Type::Variable(var), Type::Bool));
+                        args.type_consts.push((Type::Variable(next), Type::Int));
+                        sequence(*e1, *e2, next, next, next + 1, args, anon_funcs)
                     },
                     Equal | NotEq => {
-                        type_consts.push((Type::Variable(var), Type::Bool));
-                        sequence(*e1, *e2, next, next, next + 1, type_refs, type_consts, errors)
+                        args.type_consts.push((Type::Variable(var), Type::Bool));
+                        sequence(*e1, *e2, next, next, next + 1, args, anon_funcs)
                     },
                     And | Or => {
-                        type_consts.push((Type::Variable(var), Type::Bool));
-                        sequence(*e1, *e2, var, var, next, type_refs, type_consts, errors)
+                        args.type_consts.push((Type::Variable(var), Type::Bool));
+                        sequence(*e1, *e2, var, var, next, args, anon_funcs)
                     }
                 };
                 (iExpr::BinOp(Box::new(e1), op, Box::new(e2)), next)
             },
             Expr::UnOp(UnOpcode::Minus, e) => {
-                type_consts.push((Type::Variable(var), Type::Int));
-                let (e, next) = e.transform(var, next, type_map, type_refs, scope, type_consts, errors);
+                args.type_consts.push((Type::Variable(var), Type::Int));
+                let (e, next) = e.transform(var, next, args, anon_funcs);
                 (iExpr::UnOp(UnOpcode::Minus, Box::new(e)), next)
             },
             Expr::UnOp(UnOpcode::Not, e) => {
-                type_consts.push((Type::Variable(var), Type::Bool));
-                let (e, next) = e.transform(var, next, type_map, type_refs, scope, type_consts, errors);
+                args.type_consts.push((Type::Variable(var), Type::Bool));
+                let (e, next) = e.transform(var, next, args, anon_funcs);
                 (iExpr::UnOp(UnOpcode::Minus, Box::new(e)), next)
             },
             Expr::Tuple(v) => {
                 let mut v2 = Vec::new();
                 let mut nnext = next + v.len() as u16;
-                type_consts.push((Type::Variable(var), 
+                args.type_consts.push((Type::Variable(var), 
                     Type::Tuple((0..v.len()).map(|i| Type::Variable(next + i as u16)).collect())));
                 for (i, e) in v.into_iter().enumerate() {
-                    let (e, next) = e.transform(next + i as u16, nnext, type_map, type_refs, scope, type_consts, errors);
+                    let (e, next) = e.transform(next + i as u16, nnext, args, anon_funcs);
                     v2.push(e);
                     nnext = next;
                 }
                 (iExpr::Tuple(v2), nnext)
             },
             Expr::Application(e1, e2) => {
-                type_consts.push((Type::Variable(next), 
+                args.type_consts.push((Type::Variable(next), 
                     Type::Function(Box::new(Type::Variable(next + 1)),
                     Box::new(Type::Variable(var)))));
-                let (e1, e2, next) = sequence(*e1, *e2, next, next, next + 1, type_refs, type_consts, errors);
+                let (e1, e2, next) = sequence(*e1, *e2, next, next, next + 1, args, anon_funcs);
                 (iExpr::Application(Box::new(e1), Box::new(e2)), next)
             },
             Expr::Conditional(cond, e1, e2) => {
-                type_consts.push((Type::Variable(next), Type::Bool));
-                let (cond, next) = cond.transform(next, next + 1, type_map, type_refs, scope, type_consts, errors);
-                let (e1, e2, next) = sequence(*e1, *e2, var, var, next, type_refs, type_consts, errors);
+                args.type_consts.push((Type::Variable(next), Type::Bool));
+                let (cond, next) = cond.transform(next, next + 1, args, anon_funcs);
+                let (e1, e2, next) = sequence(*e1, *e2, var, var, next, args, anon_funcs);
                 (iExpr::Conditional(Box::new(cond), Box::new(e1), Box::new(e2)), next)
             },
             Expr::Function(v) => {
-                let (closure, next) = fn_transform(v, next, next+1, type_map, type_refs, scope, type_consts, errors);
-                (iExpr::Closure(closure), next)
+                let (closure, next) = fn_transform(v, next, next+1, args, anon_funcs);
+                anon_funcs.push(closure);
+                (iExpr::Closure(anon_funcs.len() as u16 - 1), next)
             },
         }
     }
 }
 
-/// # REQUIRES
+/// ### REQUIRES
 /// count > 0
 fn mk_curried_type(from: u16, count: u16) -> Type {
     let mut t = Type::Variable(from + count - 1);
@@ -397,25 +386,34 @@ fn mk_curried_type(from: u16, count: u16) -> Type {
     t
 }
 
-fn fn_transform<'a,'b>(
+impl Closure {
+    fn substitute_types(&mut self, map: &HashMap<u16, Type>) {
+        for (_, t) in &mut self.captures {
+            t.substitute_type(&map);
+        }
+        for t in &mut self.args {
+            t.substitute_type(&map);
+        }
+        self.return_type.substitute_type(&map);
+    }
+}
+
+fn fn_transform<'a,'b,'c,'d,'e>(
     fn_branches: Vec<(Vec<Pattern>, Expr)>,
     var: u16, next: u16,
-    type_map: &Vec<TypeDecl>,
-    type_refs: &mut Vec<*mut Type>,
-    scope: &'b Scope<'a,'b>,
-    type_consts: &mut Vec<TypeConstraint>,
-    errors: &mut Vec<Error>,
+    args: &mut Args<'a,'b,'c,'d,'e>,
+    anon_funcs: &mut Vec<Closure>,
 ) -> (Closure, u16) {
     let len = fn_branches[0].0.len() as u16;
     debug_assert!(len > 0);
-    type_consts.push((Type::Variable(var), mk_curried_type(next, len + 1)));
+    args.type_consts.push((Type::Variable(var), mk_curried_type(next, len + 1)));
     let mut nnext = next + len + 1;
     let mut wrapped = WrappedTree::new();
     let mut branches = Vec::new();
     let mut captures = RefCell::new(HashMap::new());
     for (i, (pats, e)) in fn_branches.into_iter().enumerate().rev() {
         if pats.len() as u16 != len {
-            errors.push(Error::VariablePatsNum);
+            args.errors.push(Error::VariablePatsNum);
         }
 
         let mut path = vec![];
@@ -423,18 +421,23 @@ fn fn_transform<'a,'b>(
         let mut local = HashMap::new();
         for (j, pat) in pats.into_iter().enumerate() {
             path.push(j as u16);
-            pat.transform(next + j as u16, nnext, &mut path, ValPath::Local, type_map, &mut local, scope, type_consts, &mut val_consts, errors);
+            pat.transform(next + j as u16, nnext, &mut path, args, ValPath::Local, &mut local, &mut val_consts);
             path.pop();
         }
         wrapped.add_pattern(val_consts, i as u16);
         let mut scope = Scope {
             local,
             captures,
-            next: Some(scope),
+            next: Some(args.scope),
         };
-        let (e, tmp) = e.transform(next + len, nnext, type_map, type_refs, &scope, type_consts, errors);
-        branches.push(e);
-        nnext = tmp;
+        unsafe {
+            let mut reference: &'c Scope = mem::transmute::<&_, &'c _>(&scope);
+            mem::swap(&mut reference, &mut args.scope);
+            let (e, tmp) = e.transform(next + len, nnext, args, anon_funcs);
+            mem::swap(&mut reference, &mut args.scope);
+            branches.push(e);
+            nnext = tmp;
+        }
         captures = RefCell::new(HashMap::new());
         mem::swap(&mut captures, &mut scope.captures);
     }
@@ -443,34 +446,83 @@ fn fn_transform<'a,'b>(
     captures.sort_unstable_by(|(ord1, _), (ord2, _)| ord1.cmp(ord2));
     let captures: Vec<(ValPath, Type)> = captures.into_iter().map(|(_, v)| v).collect();
 
-    let mut result = Closure {
+    (Closure {
         captures, dtree: wrapped.dtree, branches,
         args: (next..(next + len)).map(|n| Type::Variable(n)).collect(),
         return_type: Type::Variable(next + len),
-    };
-    type_refs.push(&mut result.return_type);
-    for t in &mut result.args {
-        type_refs.push(t);
-    }
-
-    (result, nnext)
+    }, nnext)
 }
+
+/// This code is a real mess, needs refactoring
 pub fn binding_transform<'a,'b>(
     order: u16,
     pat: Pattern, exp: Expr,
+    anon_funcs: &mut Vec<Closure>,
     type_map: &Vec<TypeDecl>,
     scope: &mut Scope<'a,'b>,
     errors: &mut Vec<Error>,
-) {
+) -> (iExpr, BTreeMap<ValPath, ConstraintValue>, Type) {
     let mut path = vec![order];
     let mut local = HashMap::new();
+    let mut _captures = RefCell::new(HashMap::new()); // discarded
     let mut type_consts = Vec::new();
-    let mut type_refs = Vec::new();
     let mut val_consts = BTreeMap::new();
-    let next = pat.transform(0, 1, &mut path, ValPath::StaticVal, type_map, &mut local, scope,
-                             &mut type_consts, &mut val_consts, errors);
-    let (exp, next) = exp.transform(0, next, type_map, &mut type_refs, scope, &mut type_consts, errors);
-    let map = unify::unify(type_consts);
-    unify::substitute(type_refs, map);
+    let next = {
+        let mut args = Args { type_map, scope, type_consts: &mut type_consts, errors };
+        pat.transform(0, 1, &mut path, &mut args, ValPath::StaticVal, &mut local, &mut val_consts)
+    };
+
+    let mut anon_tmp = Vec::new();
+    let (exp, local) = {
+        let mut scope = Scope {local, captures: _captures, next: Some(scope) };
+        let exp = {
+            let mut args = Args {
+                type_map, scope: &scope, 
+                type_consts: &mut type_consts, errors
+            };
+            exp.transform(0, next, &mut args, &mut anon_tmp).0
+        };
+        let mut hm = HashMap::new();
+        mem::swap(&mut scope.local, &mut hm);
+        (exp, hm)
+    };
+
+    let mut map = unify::unify(type_consts);
+    for closure in &mut anon_tmp {
+        closure.substitute_types(&map);
+    }
+
+    anon_funcs.extend(anon_tmp);
     scope.local.extend(local);
+
+    let mut t = Type::Variable(0);
+    t.substitute_type(&mut map);
+    (exp, val_consts, t)
+}
+
+/// transform a top-level function to imper_ast representaion,
+/// top-level functions can be recursive
+pub fn static_fn_transform<'a,'b>(
+    name: String, order: u16,
+    fn_branches: Vec<(Vec<Pattern>, Expr)>,
+    anon_funcs: &mut Vec<Closure>,
+    type_map: &Vec<TypeDecl>,
+    scope: &mut Scope<'a,'b>,
+    errors: &mut Vec<Error>,
+) -> Closure {
+    scope.local.insert(name, (ValPath::StaticFn(order), Type::Variable(0)));
+    let mut type_consts = Vec::new();
+    let mut anon_tmp = Vec::new();
+    let mut result = {
+        let mut args = Args { type_map, type_consts: &mut type_consts, scope, errors };
+        fn_transform(fn_branches, 0, 1, &mut args, &mut anon_tmp).0
+    };
+
+    let map = unify::unify(type_consts);
+    result.substitute_types(&map);
+    for closure in &mut anon_tmp {
+        closure.substitute_types(&map);
+    }
+    anon_funcs.extend(anon_tmp);
+    panic!("")
 }

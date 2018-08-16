@@ -13,9 +13,9 @@ use std::{
     }
 };
 use imper_ast::ValPath;
-use type_check::ConstraintValue;
+use imper_ast::ConstraintValue;
 
-enum PatternMatchErr {
+pub enum PatternMatchErr { // FIXME: make private and convert to general error
     Redundant(u16),
     NonExhaustive,
 }
@@ -129,7 +129,7 @@ impl DTree {
         }
     }
 
-    fn check_ok(&self, counter: &mut Vec<u16>) -> Result<(),PatternMatchErr> {
+    pub fn check_ok(&self, counter: &mut Vec<u16>) -> Result<(),PatternMatchErr> {
         use self::DTree::*;
         match *self {
             Empty => Err(PatternMatchErr::NonExhaustive),
@@ -137,8 +137,8 @@ impl DTree {
                 counter[n as usize] += 1;
                 Ok(())
             },
-            Finite { ref value, ref branches } => branches.iter().map(|b| b.check_ok(counter)).collect(),
-            Infinite { ref value, ref branches, ref default } => {
+            Finite { ref branches, .. } => branches.iter().map(|b| b.check_ok(counter)).collect(),
+            Infinite { ref branches, ref default, .. } => {
                 let res: Result<(), PatternMatchErr> = branches.iter().map(|(_, b)| b.check_ok(counter)).collect();
                 res?;
                 default.check_ok(counter)

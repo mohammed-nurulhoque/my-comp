@@ -14,14 +14,17 @@
 //! v1: HashSet<(String,Type,usize)>: Constructor name from type to ith type
 //! v2: Vec<(String, Expr, Type)>: exported values
 
-use std::collections::HashMap;
+use std::collections::{
+    HashMap,
+    BTreeMap,
+};
 use dtree::DTree;
 use types::{Type, Literal, BinOpcode, UnOpcode};
 
 pub struct Module {
     pub static_funcs: Vec<(String, Closure)>,
     pub anon_funcs: Vec<Closure>,
-    pub globals_types: Vec<Type>,
+    pub globals: Vec<(Expr, BTreeMap<ValPath, ConstraintValue>, Type)>,
     pub globals_names: HashMap<String, ValPath>,
     pub type_decls: Vec<TypeDecl>,
 }
@@ -47,6 +50,18 @@ pub struct Closure {
     pub return_type: Type,
     pub dtree: DTree,
     pub branches: Vec<Expr>,
+}
+
+/// A pattern is a set of constraints on a value, which are categorized as follows
+#[derive(PartialEq, Eq, Hash, Clone)]
+pub enum ConstraintValue {
+    /// nth option out of x finitely many option, includes Booleans and union tags
+    Finite(u16, u16),
+    /// integer constraint which is technically finite but represented sparsely, so
+    /// is practically inifinite
+    Int(isize),
+    /// string constraint, we allow strings in pattern matching
+    Str(String),
 }
 
 pub enum Expr {
