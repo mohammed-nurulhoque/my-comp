@@ -22,7 +22,7 @@ use dtree::DTree;
 use types::{Type, Literal, BinOpcode, UnOpcode};
 
 pub struct Module {
-    pub static_funcs: Vec<(String, Closure)>,
+    pub static_funcs: Vec<(Closure, String)>,
     pub anon_funcs: Vec<Closure>,
     pub globals: Vec<(Expr, BTreeMap<ValPath, ConstraintValue>, Type)>,
     pub globals_names: HashMap<String, ValPath>,
