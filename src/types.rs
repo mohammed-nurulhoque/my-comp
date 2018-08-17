@@ -8,7 +8,7 @@ pub enum ProtoType {
     Generic(String),
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum Type {
     Unit,
     Int, Bool, String,
