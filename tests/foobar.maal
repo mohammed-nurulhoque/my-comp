@@ -1,5 +1,5 @@
 type Tree t =
-    | nil ()
+    | leaf ()
     | node (Tree t, t, Tree t)
     ;
 
@@ -9,16 +9,16 @@ type List t =
     ;
 
 fn append =
-    | (List.nil (), right) => right
-    | (List.cons (x, left), right) => List.cons(x, append (left right))
+    | (nil (), right) => right
+    | (cons (x, left), right) => cons(x, append (left, right))
     ;
 
 fn inorder =
-    | Tree.nil () => List.nil ()
-    | Tree.node (left, v, right) => append (inorder left, List.cons (v, inorder right))
+    | (leaf ()) => nil ()
+    | (node (left, v, right)) => append (inorder left, cons (v, inorder right))
     ;
 
-x = inorder (Tree.nil ());
+x = inorder (leaf ());
 x = (true, false);
 x = 1 + 2 * 2 - 1 + -3;
 x = "a\n\"bcdefg";

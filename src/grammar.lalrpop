@@ -46,7 +46,7 @@ Pattern: Pattern = {
     Literal => Pattern::Literal(<>),
     "_" => Pattern::Wild,
     ID => Pattern::Bind(<>),
-    "(" <v:(<Pattern> ",")+> <last:Pattern> ")" => {
+    "(" <v:(<PatternH> ",")+> <last:PatternH> ")" => {
         let mut v = v;
         v.push(last);
         Pattern::Tuple(v)
