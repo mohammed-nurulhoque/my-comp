@@ -12,6 +12,7 @@ use types::{BinOpcode, Literal, ProtoType, Type, UnOpcode};
 use unify;
 
 /// All errors from AST -> imperAST phase, not used yet!
+#[derive(Debug)]
 pub enum Error {
     TypeMismatch(Type, Type),
     ConstructorUnification,
@@ -27,7 +28,7 @@ pub enum Error {
 /// which are either value binding or type declarations. Converts to
 /// a Module struct (see imper_ast.rs) which separated functions and
 /// variables.
-pub fn ast2imper_ast(bindings: Vec<Binding>) -> Module {
+pub fn ast2imper_ast(bindings: Vec<Binding>) -> Result<Module, Error> {
     let mut errors = Vec::new();
     let mut type_map = HashMap::new();
     let mut static_funcs = Vec::new();
@@ -56,7 +57,7 @@ pub fn ast2imper_ast(bindings: Vec<Binding>) -> Module {
                         &mut type_decls,
                         &mut scope,
                         &mut errors,
-                    ),
+                    )?,
                     name,
                 ));
                 fun_order += 1;
@@ -73,17 +74,17 @@ pub fn ast2imper_ast(bindings: Vec<Binding>) -> Module {
                     &mut type_decls,
                     &mut scope,
                     &mut errors,
-                ));
+                )?);
                 val_order += 1;
             }
         }
     }
 
-    Module {
+    Ok(Module {
         static_funcs, anon_funcs, globals, type_decls,
         globals_names: scope.local.into_iter()
             .map(|(s, (path, _))| (s, path)).collect(),
-    }
+    })
 }
 
 type TypeConstraint = (Type, Type);
@@ -193,7 +194,7 @@ fn binding_transform<'a, 'b>(
     type_decls: &Vec<TypeDecl>,
     scope: &mut Scope<'a, 'b>,
     errors: &mut Vec<Error>,
-) -> (iExpr, BTreeMap<ValPath, ConstraintValue>, Type) {
+) -> Result<(iExpr, BTreeMap<ValPath, ConstraintValue>, Type), Error> {
     let mut path = vec![order];
     let mut local = HashMap::new();
     let mut _captures = RefCell::new(HashMap::new()); // discarded
@@ -238,7 +239,7 @@ fn binding_transform<'a, 'b>(
         (expr, hm)
     };
 
-    let mut map = unify::unify(type_consts);
+    let mut map = unify::unify(type_consts)?;
     for closure in &mut anon_tmp {
         closure.substitute_types(&map);
     }
@@ -248,7 +249,7 @@ fn binding_transform<'a, 'b>(
 
     let mut t = Type::Variable(0);
     t.substitute_type(&mut map);
-    (expr, val_consts, t)
+    Ok((expr, val_consts, t))
 }
 
 /// transform a top-level function to imper_ast representaion,
@@ -261,7 +262,7 @@ fn static_fn_transform<'a, 'b>(
     type_decls: &Vec<TypeDecl>,
     scope: &mut Scope<'a, 'b>,
     errors: &mut Vec<Error>,
-) -> Closure {
+) -> Result<Closure,Error> {
     scope.local.insert(
         name.to_string(),
         (ValPath::StaticFn(order), Type::Variable(0)),
@@ -278,13 +279,13 @@ fn static_fn_transform<'a, 'b>(
         fn_transform(fn_branches, 0, 1, &mut args, &mut anon_tmp).0
     };
 
-    let map = unify::unify(type_consts);
+    let map = unify::unify(type_consts)?;
     result.substitute_types(&map);
     for closure in &mut anon_tmp {
         closure.substitute_types(&map);
     }
     anon_funcs.extend(anon_tmp);
-    panic!("")
+    Ok(result)
 }
 
 fn get_type_decl<'a, 'b>(

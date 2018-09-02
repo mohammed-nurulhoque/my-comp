@@ -11,7 +11,7 @@ mod test {
     };
     #[test]
     fn test () {
-        use mylang::{ast::*, types::*};
+        //use mylang::{ast::*, types::*};
         let parser = grammar::ProgramParser::new();
         let mut f = File::open("tests/foobar.maal").expect("file not found");
         let mut contents = String::new();
@@ -19,8 +19,7 @@ mod test {
             .expect("Cannot read file");
         let result = parser.parse(&contents);
         assert!(result.is_ok());
-        let result = result.unwrap();
-        
+        let _result = result.unwrap();
 
     }
 }
