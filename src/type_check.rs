@@ -3,7 +3,7 @@
 //! This module contains the logic for transforming a compilation unit from AST
 //! to imperAST.
 use ast::{Binding, Expr, Pattern};
-use dtree::WrappedTree;
+use dtree::DTree;
 use imper_ast::{Closure, ConstraintValue, Expr as iExpr, Module, TypeDecl, ValPath};
 use std::{
     cell::{Ref, RefCell}, cmp::max, collections::{BTreeMap, HashMap}, mem, ops::Deref,
@@ -105,7 +105,7 @@ where
 /// returns "Ref"s, the reference inside cannot be moved out of the Ref.
 enum NameInfo<'a> {
     Direct(&'a (ValPath, Type)),
-    Wrapped(Ref<'a, (ValPath, Type)>),
+    DTree(Ref<'a, (ValPath, Type)>),
 }
 
 impl<'a> Deref for NameInfo<'a> {
@@ -114,7 +114,7 @@ impl<'a> Deref for NameInfo<'a> {
     fn deref(&self) -> &Self::Target {
         match *self {
             NameInfo::Direct(reference) => reference,
-            NameInfo::Wrapped(ref reference) => &*reference,
+            NameInfo::DTree(ref reference) => &*reference,
         }
     }
 }
@@ -140,7 +140,7 @@ impl<'a, 'b> Scope<'a, 'b> {
         } else {
             let map = self.captures.borrow();
             if map.get(name).is_some() {
-                return Some(NameInfo::Wrapped(Ref::map(map, |map| {
+                return Some(NameInfo::DTree(Ref::map(map, |map| {
                     &map.get(name).unwrap().1
                 })));
             }
@@ -339,7 +339,7 @@ fn fn_transform<'a, 'b, 'c, 'd, 'e>(
     args.type_consts
         .push((Type::Variable(var), mk_curried_type(next, len + 1)));
     let mut nnext = next + len + 1;
-    let mut wrapped = WrappedTree::new();
+    let mut dtree = DTree::new();
     let mut branches = Vec::new();
     let mut captures = RefCell::new(HashMap::new());
     for (i, (pats, e)) in fn_branches.into_iter().enumerate().rev() {
@@ -363,7 +363,7 @@ fn fn_transform<'a, 'b, 'c, 'd, 'e>(
             );
             path.pop();
         }
-        wrapped.add_pattern(val_consts, i as u16);
+        dtree.add_pattern(&mut val_consts, i as u16);
         let mut scope = Scope {
             local,
             captures,
@@ -392,7 +392,7 @@ fn fn_transform<'a, 'b, 'c, 'd, 'e>(
     (
         Closure {
             captures,
-            dtree: wrapped.dtree,
+            dtree,
             branches,
             args: (next..(next + len)).map(|n| Type::Variable(n)).collect(),
             return_type: Type::Variable(next + len),

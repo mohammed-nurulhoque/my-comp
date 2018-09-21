@@ -1,5 +1,5 @@
 //! This module defines a typed AST, which is the second intermediate form,
-//! It's genereated from the AST created by the pareser.
+//! It's genereated from the AST created by the parser.
 //! 
 //! item path convention:
 //! 0.xyz: path xyz in function arguments

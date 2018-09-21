@@ -3,13 +3,37 @@
 //! imperative representation of a program
 //! It generates a decision tree from a set of patterns and checks for
 //! redundancy and exhaustiveness in the patterns.
+//!
+//! #Algorithm
+//!
+//! INPUT: a sequence of sets of constraints, where each set defines the
+//! value path constraints in a pattern, and the sequnce contains the patterns in order.
+//!
+//! OUTPUT: a wrappedTree containing the decision tree for the set of patterns.
+//!
+//! Procedure description: 
+//! The decision tree for a single constraints set is trivial with
+//! the condition that the constraint for the tag of a union tag should precede
+//! the constraint for the value of the union which is achieved by making the
+//! set lexicographically. A tag has a .0 path while a value has >= .1.
+//!
+//! For a sequence of constraint, we add them in reverse order with the higher
+//! patterns (later inserted) possibly overriding the decision of a lower
+//! pattern.
+//!
+//! When a new pattern p with constraints C is inserted to a tree T
+//! For nodes in T starting from root:
+//! if node.value v in C:
+//!     modify node.branches[v] with C = C\v
+//! else:
+//!     modify all branches with C
+//! When T = exit or empty reached:
+//!     replace with signular(C, tail = exit(i), default = T)
 
 use std::{
-    mem,
     collections::{
         HashMap,
         BTreeMap,
-        BTreeSet,
     }
 };
 use imper_ast::ValPath;
@@ -20,24 +44,20 @@ pub enum PatternMatchErr { // FIXME: make private and convert to general error
     NonExhaustive,
 }
 
-/// Decision Tree
-pub struct WrappedTree {
-    pub dtree: DTree,
-    /// Set of paths in the matched type that are constrained by the matchings
-    consted_values: BTreeSet<ValPath>,
-}
-
+#[derive(Clone)]
 pub enum DTree {
     /// existance in final tree implies inexhaustiveness
     Empty,
     /// nth pattern satisfied
     Exit(u16),
     Finite {
+        /// value to test
         value: ValPath,
         /// branch for each possibility in the finite set
         branches: Vec<DTree>,
     },
     Infinite {
+        /// value to test
         value: ValPath,
         /// branch for each constrained value
         branches: HashMap<ConstraintValue,DTree>,
@@ -46,50 +66,29 @@ pub enum DTree {
     },
 }
 
-impl WrappedTree {
-    /// a new empty wrapped tree
-    pub fn new() -> Self {
-        WrappedTree {
-            dtree: DTree::Empty,
-            consted_values: BTreeSet::new(),
-        }
-    }
-
-    /// add another pattern to the decision tree, 
-    /// the patterns should be added in reverse order
-    pub fn add_pattern(&mut self, consts: BTreeMap<ValPath,ConstraintValue>, exit: u16) {
-        let mut difference = BTreeMap::new();
-        let mut intersect = BTreeMap::new();
-        for (k, v) in consts {
-            if self.consted_values.contains(&k) {
-                intersect.insert(k, v);
-            } else {
-                difference.insert(k, v);
-            }
-        }
-        self.dtree.modify_with(&mut intersect, exit);
-        let mut dtree = DTree::Empty;
-        mem::swap(&mut dtree, &mut self.dtree);
-        self.dtree = DTree::singular(&difference, dtree);
-    }
-}
-
 impl DTree {
-    /// create a tree the matches the constraints in map and all other branches
-    /// are empty
-    fn singular(map: &BTreeMap<ValPath,ConstraintValue>, mut tail: DTree) -> Self {
+    pub fn new() -> Self {
+        DTree::Empty
+    }
+
+    /// create a tree the matches the constraints exiting with tail, else exits with default
+    fn singular(
+        map: &BTreeMap<ValPath,ConstraintValue>, 
+        mut tail: DTree, 
+        default: &DTree
+    ) -> Self {
         use self::ConstraintValue::*;
         for (value, consted) in map.iter().rev() {
             match *consted {
                 Finite(m, n) => {
-                    let mut branches: Vec<_> = (0..n).map(|_| DTree::Empty).collect();
+                    let mut branches: Vec<_> = (0..n).map(|i| if i==m {DTree::Empty} else {default.clone()}).collect();
                     branches[m as usize] = tail;
                     tail = DTree::Finite { value: value.clone(), branches };
                 },
                 Int(_) | Str(_)  => {
                     let mut branches = HashMap::new();
                     branches.insert(consted.clone(), tail);
-                    tail = DTree::Infinite { value: value.clone(), branches, default: Box::new(DTree::Empty) };
+                    tail = DTree::Infinite { value: value.clone(), branches, default: Box::new(default.clone()) };
                 },
             }
         }
@@ -98,33 +97,34 @@ impl DTree {
     }
 
     /// modify the tree to match the exit pattern when the constraints in map are met
-    /// REQUIRES self matches all patterns after the one in map
-    fn modify_with(&mut self, map: &mut BTreeMap<ValPath,ConstraintValue>, exit: u16) {
+    /// REQUIRES exit has higher precedence that patterns in self
+    pub fn add_pattern(&mut self, map: &mut BTreeMap<ValPath,ConstraintValue>, exit: u16) 
+    {
         use self::DTree::*;
         match *self {
-            Empty | Exit(_) => *self = Self::singular(map, Exit(exit)),
+            Empty | Exit(_) => *self = Self::singular(map, Exit(exit), self),
             Finite { ref value, ref mut branches } if map.contains_key(value) => {
                 if let ConstraintValue::Finite(n, _) = map.remove(value).unwrap() { // !!!
-                    branches[n as usize].modify_with(map, exit)
+                    branches[n as usize].add_pattern(map, exit)
                 } else {
                     panic!("infinite & finite contradiction")
                 }
             },
             Finite { ref mut branches, .. } => for branch in branches {
-                branch.modify_with(map, exit)
+                branch.add_pattern(&mut map.clone(), exit)
             },
             Infinite { ref value, ref mut branches, .. } if map.contains_key(value) => {
                 let key = map.remove(value).unwrap();
                 if let Some(dtree) = branches.get_mut(&key) {
-                    return dtree.modify_with(map, exit)
+                    return dtree.add_pattern(map, exit)
                 }
-                branches.insert(key, Self::singular(map, Exit(exit)));
+                branches.insert(key, Self::singular(map, Exit(exit), &DTree::Empty));
             },
             Infinite { ref mut branches, ref mut default, .. } => {
                 for branch in branches.values_mut() {
-                    branch.modify_with(map, exit);
+                    branch.add_pattern(&mut map.clone(), exit);
                 }
-                default.modify_with(map, exit);
+                default.add_pattern(map, exit);
             }
         }
     }

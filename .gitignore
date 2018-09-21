@@ -1,3 +1,5 @@
+/Cargo.lock
+/settings.json
 /target
 /src/grammar.rs
 **/*.rs.bk
