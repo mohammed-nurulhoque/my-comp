@@ -39,35 +39,74 @@ mod test {
     use super::*;
     #[test]
     fn test() {
-        let tree = DTree::new();
-        for set in [
-            (
-                0,
-                [
-                    (ValPath::local(vec![0]), ConstraintValue::Finite(0, 2)),
-                    (ValPath::local(vec![1]), ConstraintValue::Finite(1, 2)),
-                ],
-            ),
-            (
-                1,
-                [
-                    (ValPath::local(vec![0]), ConstraintValue::Finite(1, 2)),
-                    (ValPath::local(vec![1]), ConstraintValue::Finite(0, 2)),
-                ],
-            ),
-            (
-                2,
-                [(ValPath::local(vec![0]), ConstraintValue::Finite(0, 2))],
-            ),
-            (3, []),
-        ] {
-            let map = BTreeMap::new();
-            for (i, array) in set {
-                map.insert(valpath, constraint);
+        let all_tests = vec![
+            vec![
+                /*
+                true false -> 0
+                false true -> 1
+                true  _    -> 2
+                _     _    -> 3
+                */
+                (
+                    0,
+                    vec![
+                        (ValPath::Local(vec![0]), ConstraintValue::Finite(0, 2)),
+                        (ValPath::Local(vec![1]), ConstraintValue::Finite(1, 2)),
+                    ],
+                ),
+                (
+                    1,
+                    vec![
+                        (ValPath::Local(vec![0]), ConstraintValue::Finite(1, 2)),
+                        (ValPath::Local(vec![1]), ConstraintValue::Finite(0, 2)),
+                    ],
+                ),
+                (
+                    2,
+                    vec![(ValPath::Local(vec![0]), ConstraintValue::Finite(0, 2))],
+                ),
+                (3, vec![]),
+            ],
+            vec![
+                /*
+                (TWO  13) _ -> 0
+                _         5 -> 1
+                (ONE   _) _ -> 2
+                (THREE _) _ -> 3
+                _         _ -> 4
+                 */
+                (
+                    0,
+                    vec![
+                        (ValPath::Local(vec![0, 0]), ConstraintValue::Finite(1, 3)),
+                        (ValPath::Local(vec![0, 1]), ConstraintValue::Int(13)),
+                    ],
+                ),
+                (1, vec![(ValPath::Local(vec![1]), ConstraintValue::Int(5))]),
+                (
+                    2,
+                    vec![(ValPath::Local(vec![0, 0]), ConstraintValue::Finite(0, 3))],
+                ),
+                (
+                    3,
+                    vec![(ValPath::Local(vec![0, 0]), ConstraintValue::Finite(2, 3))],
+                ),
+                (4, vec![]),
+            ],
+        ];
+
+        for set in all_tests {
+            let mut tree = DTree::new();
+            let len = set.len() as u16;
+            for (i, array) in set.into_iter().rev() {
+                let mut map = BTreeMap::new();
+                for (valpath, constraint) in array {
+                    map.insert(valpath, constraint);
+                }
+                tree.add_pattern(map, i)
             }
-            tree.add_pattern(maps)
+            assert!(tree.is_sound_complete(len).is_ok());
         }
-        tree.is_sound_complete(3).unwrap();
     }
 }
 
@@ -77,18 +116,21 @@ pub enum PatternMatchErr {
     NonExhaustive,
 }
 
-#[derive(Clone)]
+/// A decision tree for pattern matching
+#[derive(Clone, Debug)]
 pub enum DTree {
     /// existance in final tree implies inexhaustiveness
     Empty,
     /// nth pattern satisfied
     Exit(u16),
+    /// bool or tagged union
     Finite {
         /// value to test
         value: ValPath,
         /// branch for each possibility in the finite set
         branches: Vec<DTree>,
     },
+    /// integer or string
     Infinite {
         /// value to test
         value: ValPath,
@@ -104,8 +146,8 @@ impl DTree {
         DTree::Empty
     }
 
-    /// create a tree the matches the constraints exiting with tail, else exits with default
-    fn singular(
+    /// create a tree the matches the constraints in map exiting with tail, else exits with default
+    fn make_tree(
         map: &BTreeMap<ValPath, ConstraintValue>,
         mut tail: DTree,
         default: &DTree,
@@ -140,22 +182,16 @@ impl DTree {
                 }
             }
         }
-
         tail
     }
 
     /// modify the tree to match the exit pattern when the constraints in map are met
     /// REQUIRES exit has higher precedence that patterns in self
-    pub fn add_pattern(&mut self, map: &mut BTreeMap<ValPath, ConstraintValue>, exit: u16) {
+    pub fn add_pattern(&mut self, mut map: BTreeMap<ValPath, ConstraintValue>, exit: u16) {
         use self::DTree::*;
         match *self {
-            Empty | Exit(_) => *self = Self::singular(map, Exit(exit), self),
-            Finite {
-                ref value,
-                ref mut branches,
-            }
-                if map.contains_key(value) =>
-            {
+            Empty | Exit(_) => *self = Self::make_tree(&map, Exit(exit), self),
+            Finite { ref value, ref mut branches } if map.contains_key(value) => {
                 if let ConstraintValue::Finite(n, _) = map.remove(value).unwrap() {
                     // !!!
                     branches[n as usize].add_pattern(map, exit)
@@ -163,64 +199,31 @@ impl DTree {
                     panic!("infinite & finite contradiction")
                 }
             }
-            Finite {
-                ref mut branches, ..
-            } => {
+            Finite { ref mut branches, .. } => {
                 for branch in branches {
-                    branch.add_pattern(&mut map.clone(), exit)
+                    branch.add_pattern(map.clone(), exit)
                 }
             }
-            Infinite {
-                ref value,
-                ref mut branches,
-                ..
-            }
-                if map.contains_key(value) =>
-            {
+            Infinite { ref value, ref mut branches, .. } if map.contains_key(value) => {
                 let key = map.remove(value).unwrap();
+                // logically this is
+                // if let _ = branches.get_mut() { add pattern } else { insert branch }
+                // but branches remains borrowed in else part, hence this structure
                 if let Some(dtree) = branches.get_mut(&key) {
                     return dtree.add_pattern(map, exit);
                 }
-                branches.insert(key, Self::singular(map, Exit(exit), &DTree::Empty));
+                branches.insert(key, Self::make_tree(&map, Exit(exit), &DTree::Empty));
             }
-            Infinite {
-                ref mut branches,
-                ref mut default,
-                ..
-            } => {
+            Infinite { ref mut branches, ref mut default, .. } => {
                 for branch in branches.values_mut() {
-                    branch.add_pattern(&mut map.clone(), exit);
+                    branch.add_pattern(map.clone(), exit);
                 }
                 default.add_pattern(map, exit);
             }
         }
     }
 
-    fn check_tree(&self, counter: &mut Vec<bool>) -> bool {
-        use self::DTree::*;
-        match *self {
-            Empty => false,
-            Exit(n) => {
-                counter[n as usize] = true;
-                true
-            }
-            Finite { ref branches, .. } => {
-                branches.iter().map(|b| b.check_tree(counter)).all(|p| p)
-            }
-            Infinite {
-                ref branches,
-                ref default,
-                ..
-            } => {
-                let res = branches
-                    .iter()
-                    .map(|(_, b)| b.check_tree(counter))
-                    .any(|res| res == true);
-                res && default.check_tree(counter)
-            }
-        }
-    }
-
+    /// check whether a decision tree is exhaustive and non-repetitive
     pub fn is_sound_complete(&self, num_pats: u16) -> Result<(), PatternMatchErr> {
         let mut flags = vec![false; num_pats as usize];
         if self.check_tree(&mut flags) {
@@ -232,6 +235,28 @@ impl DTree {
             Ok(())
         } else {
             Err(PatternMatchErr::NonExhaustive)
+        }
+    }
+
+    /// check that dtree has no empty subtree, and sets flags for exits found
+    fn check_tree(&self, counter: &mut [bool]) -> bool {
+        use self::DTree::*;
+        match *self {
+            Empty => false,
+            Exit(n) => {
+                counter[n as usize] = true;
+                true
+            }
+            Finite { ref branches, .. } => {
+                branches.iter().map(|b| b.check_tree(counter)).all(|p| p)
+            }
+            Infinite { ref branches, ref default, .. } => {
+                let res = branches
+                    .iter()
+                    .map(|(_, b)| b.check_tree(counter))
+                    .all(|res| res);
+                res && default.check_tree(counter)
+            }
         }
     }
 }

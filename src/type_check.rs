@@ -248,7 +248,7 @@ fn binding_transform<'a, 'b>(
     scope.local.extend(local);
 
     let mut t = Type::Variable(0);
-    t.substitute_type(&mut map);
+    t.substitute_vars(&mut map);
     Ok((expr, val_consts, t))
 }
 
@@ -363,7 +363,7 @@ fn fn_transform<'a, 'b, 'c, 'd, 'e>(
             );
             path.pop();
         }
-        dtree.add_pattern(&mut val_consts, i as u16);
+        dtree.add_pattern(val_consts, i as u16);
         let mut scope = Scope {
             local,
             captures,
@@ -642,83 +642,11 @@ impl Literal {
 impl Closure {
     fn substitute_types(&mut self, map: &HashMap<u16, Type>) {
         for (_, t) in &mut self.captures {
-            t.substitute_type(&map);
+            t.substitute_vars(&map);
         }
         for t in &mut self.args {
-            t.substitute_type(&map);
+            t.substitute_vars(&map);
         }
-        self.return_type.substitute_type(&map);
-    }
-}
-
-/// instantiate a type by substituting generics with variables
-/// starting from var, Generic(n) => Variable(var + n)
-/// # RETURNS
-/// instantiated type and next free variable
-fn gen2var(t: &Type, var: u16) -> (Type, u16) {
-    match *t {
-        Type::Unit | Type::Int | Type::Bool | Type::String => (t.clone(), var),
-        Type::Constructor {
-            ref arg,
-            target,
-            position,
-        } => {
-            let (arg, next) = gen2var(arg, var);
-            (
-                Type::Constructor {
-                    arg: Box::new(arg),
-                    target,
-                    position,
-                },
-                next,
-            )
-        }
-        Type::Function(ref from, ref to) => {
-            let (from, next) = gen2var(from, var);
-            let (to, nnext) = gen2var(to, var);
-            (
-                Type::Function(Box::new(from), Box::new(to)),
-                max(next, nnext),
-            )
-        }
-        Type::Generic(n) => (Type::Variable(var + n), var + n + 1),
-        Type::Sum(n, ref t) => {
-            let (t, next) = gen2var(&*t, var);
-            (Type::Sum(n, Box::new(t)), next)
-        }
-        Type::Tuple(ref v) => {
-            let (v, n): (Vec<Type>, Vec<u16>) = v.iter().map(|e| gen2var(e, var)).unzip();
-            let n = n.into_iter().fold(var, |acc, elem| max(acc, elem));
-            (Type::Tuple(v), n)
-        }
-        Type::Variable(_) => panic!("tried to instantiate instantiated type"),
-    }
-}
-
-fn to_type(
-    t: ProtoType,
-    map: &HashMap<String, u16>, // map of type names -> index in types vector
-    conver: &HashMap<String, u16>, // map of generics to variables
-) -> Type {
-    use self::ProtoType as P;
-    use self::Type as T;
-    match t {
-        P::Unit => T::Unit,
-        P::Int => T::Int,
-        P::Bool => T::Bool,
-        P::String => T::String,
-        P::Tuple(v) => T::Tuple(v.into_iter().map(|t| to_type(t, map, conver)).collect()),
-        P::Function(from, to) => T::Function(
-            Box::new(to_type(*from, map, conver)),
-            Box::new(to_type(*to, map, conver)),
-        ),
-        P::Generic(name) => match conver.get(&name) {
-            Some(&n) => T::Generic(n),
-            None => panic!("Error, generic not found"), // to be removed
-        },
-        P::Sum(name, t) => match map.get(&name) {
-            Some(&n) => T::Sum(n, Box::new(to_type(*t, map, conver))),
-            None => panic!("should be error type not defined"), // to be removed
-        },
+        self.return_type.substitute_vars(&map);
     }
 }

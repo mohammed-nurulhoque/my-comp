@@ -6,7 +6,7 @@ fn fold =
 var(0) = var(1) -> var(2) -> var(3) -> var(4)   # fold: var(0)
 var(3) = List(var(5))       # Nil()
 var(4) = var(2)             # b
-var(3) = List(var(6))       # Cons(_,_)
+var(3) = List(var(6))       # Cons(_,_), x: var(6), L: List(var(6))
 var(7) = var(8) -> var(4)   # (f): var(7), (_,_): var(8)
 var(7) = var(1)             # f
 var(8) = (var(9), var(10))  # (_,_)
@@ -15,3 +15,14 @@ var(11) = List(var(6)) -> var(10)   # (fold f b): var(11)
 var(12) = var(2) -> var(11)         # (fold f): var(11)
 var(13) = var(1) -> var(12)         # (fold): var(12)
 var(13) = var(0)                    # fold
+
+var(0) = Function(
+    Function(Generic(0), Generic(1)),   # f
+    Function(
+        Generic(1),                     # b
+        Function(
+            Sum(0, Generic(0)),         # l
+            Generic(1)                  # final return type
+        )
+    )
+)

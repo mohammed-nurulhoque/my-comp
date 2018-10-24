@@ -29,7 +29,7 @@ pub struct Module {
     pub type_decls: Vec<TypeDecl>,
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum ValPath {
     Local(Vec<u16>),
     Capture(Vec<u16>),
@@ -53,7 +53,7 @@ pub struct Closure {
 }
 
 /// A pattern is a set of constraints on a value, which are categorized as follows
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub enum ConstraintValue {
     /// nth option out of x finitely many option, includes Booleans and union tags
     Finite(u16, u16),
