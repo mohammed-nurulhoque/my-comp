@@ -2,28 +2,40 @@
 //! 
 //! This module contains the logic for transforming a compilation unit from AST
 //! to imperAST.
-use ast::{Binding, Expr, Pattern};
-use dtree::DTree;
-use imper_ast::{Closure, ConstraintValue, Expr as iExpr, Module, TypeDecl, ValPath};
-use std::{
-    cell::{Ref, RefCell}, cmp::max, collections::{BTreeMap, HashMap}, mem, ops::Deref,
+
+use std::collections::{ HashMap, BTreeMap };
+use crate::{
+    ast::{Binding, Expr, Pattern},
+    imper_ast::{Closure, ConstraintValue, Expr as iExpr, Module, TypeDecl, ValPath},
+    dtree::DTree,
+    types::{BinOpcode, Literal, ProtoType, Type, UnOpcode},
+    unify,
+    namescope::NameScope,
+    error::Error,
 };
-use types::{BinOpcode, Literal, ProtoType, Type, UnOpcode};
-use unify;
 
-/// All errors from AST -> imperAST phase, not used yet!
-#[derive(Debug)]
-pub enum Error {
-    TypeMismatch(Type, Type),
-    ConstructorUnification,
-    NameNotFound(String),
-    MultBindPattern(String),
-    ConstructorNotFound(String),
-    NonConstAppPattern(String),
-    TypeNotDefined(String),
-    VariablePatsNum,
+#[cfg(test)]
+mod test {
+    #[test]
+
+    fn test_mk_curried() {
+        use types::Type::{ Function, Variable };
+        let t = super::mk_curried_type(5, 5);
+        assert_eq!(t, Function(
+            Box::new(Variable(5)), 
+            Box::new(Function(
+                Box::new(Variable(6)),
+                Box::new(Function(
+                    Box::new(Variable(7)),
+                    Box::new(Function(
+                        Box::new(Variable(8)),
+                        Box::new(Variable(9)),
+                    ))
+                ))
+            ))
+        ));
+    }
 }
-
 /// The transformation function, takes a series of bindings in AST form,
 /// which are either value binding or type declarations. Converts to
 /// a Module struct (see imper_ast.rs) which separated functions and
@@ -31,49 +43,32 @@ pub enum Error {
 pub fn ast2imper_ast(bindings: Vec<Binding>) -> Result<Module, Error> {
     let mut errors = Vec::new();
     let mut type_map = HashMap::new();
-    let mut static_funcs = Vec::new();
-    let mut anon_funcs = Vec::new();
-    let global_names = HashMap::new();
+    let mut closures = Vec::new();
+    let mut global_scope = NameScope::new();
     let mut globals = Vec::new();
     let mut type_decls = Vec::new();
-    let captures = RefCell::new(HashMap::new());
+    let mut type_consts = Vec::new();
     let mut val_order = 0;
-    let mut fun_order = 0;
 
-    let mut scope = Scope {
-        local: global_names,
-        captures,
-        next: None,
-    };
     for binding in bindings {
+        let mut args = Args {
+            type_decls: &mut type_decls,
+            closures: &mut closures,
+            namescope: &mut global_scope,
+            type_consts: &mut type_consts,
+            errors: &mut errors,
+        };
         match binding {
-            Binding::Function { name, variants } => {
-                static_funcs.push((
-                    static_fn_transform(
-                        &name,
-                        fun_order,
-                        variants,
-                        &mut anon_funcs,
-                        &mut type_decls,
-                        &mut scope,
-                        &mut errors,
-                    )?,
-                    name,
-                ));
-                fun_order += 1;
-            }
-            Binding::Type { name, vars, variants,} => type_decls.push(
-                get_type_decl(name, vars, variants, &mut type_map, &mut scope,
+            Binding::Type { name, vars, variants,} => args.type_decls.push(
+                get_type_decl(name, vars, variants, &mut type_map, args.namescope,
             )),
-            Binding::Value(pat, expr) => {
+            Binding::Value(pat, expr, is_rec) => {
                 globals.push(binding_transform(
                     val_order,
                     pat,
                     expr,
-                    &mut anon_funcs,
-                    &mut type_decls,
-                    &mut scope,
-                    &mut errors,
+                    is_rec,
+                    &mut args,
                 )?);
                 val_order += 1;
             }
@@ -81,108 +76,22 @@ pub fn ast2imper_ast(bindings: Vec<Binding>) -> Result<Module, Error> {
     }
 
     Ok(Module {
-        static_funcs, anon_funcs, globals, type_decls,
-        globals_names: scope.local.into_iter()
+        closures, globals, type_decls,
+        globals_names: global_scope.pop_layer().into_iter()
             .map(|(s, (path, _))| (s, path)).collect(),
     })
 }
 
+/// just more expressive
 type TypeConstraint = (Type, Type);
 
 /// wraps arguments for conciseness
-struct Args<'a, 'b, 'c, 'd, 'e>
-where
-    'b: 'c,
-{
-    type_decls: &'a Vec<TypeDecl>,
-    scope: &'c Scope<'b, 'c>,
-    type_consts: &'d mut Vec<TypeConstraint>,
-    errors: &'e mut Vec<Error>,
-}
-
-/// A reference to the info about a name in a scope,
-/// this is required because we use a refcell for captured values which
-/// returns "Ref"s, the reference inside cannot be moved out of the Ref.
-enum NameInfo<'a> {
-    Direct(&'a (ValPath, Type)),
-    DTree(Ref<'a, (ValPath, Type)>),
-}
-
-impl<'a> Deref for NameInfo<'a> {
-    type Target = (ValPath, Type);
-
-    fn deref(&self) -> &Self::Target {
-        match *self {
-            NameInfo::Direct(reference) => reference,
-            NameInfo::DTree(ref reference) => &*reference,
-        }
-    }
-}
-
-struct Scope<'a, 'b>
-where
-    'a: 'b,
-{
-    /// the local variables (arguments)
-    local: HashMap<String, (ValPath, Type)>,
-    /// captures from an outer scopes
-    captures: RefCell<HashMap<&'a str, (u16, (ValPath, Type))>>,
-    /// reference to the next enclosing scope
-    next: Option<&'b Scope<'a, 'b>>,
-}
-
-impl<'a, 'b> Scope<'a, 'b> {
-    /// get name from scope, if name not found in the current scope
-    /// fills captures in all parent scopes until the containing scope
-    fn get(&self, name: &str) -> Option<NameInfo> {
-        if let Some(val) = self.local.get(name) {
-            return Some(NameInfo::Direct(val));
-        } else {
-            let map = self.captures.borrow();
-            if map.get(name).is_some() {
-                return Some(NameInfo::DTree(Ref::map(map, |map| {
-                    &map.get(name).unwrap().1
-                })));
-            }
-        }
-
-        let mut node: Option<&'b Scope<'a, 'b>> = self.next;
-        let mut v = vec![&self.captures];
-        let (key, (path, t)): (&'a str, (ValPath, Type)) = loop {
-            if node.is_none() {
-                return None;
-            }
-            let scope = node.unwrap() as *const Scope<'a, 'b>;
-            unsafe {
-                if let Some((key, val)) = (*scope).local.get_key_value(name) {
-                    use self::ValPath::*;
-                    match val.0 {
-                        Local(_) => break (key, val.clone()),
-                        Capture(_) => panic!("captured in local scope"),
-                        StaticVal(_) | StaticFn(_) | Constructor => {
-                            return Some(NameInfo::Direct(val))
-                        }
-                    }
-                } else {
-                    if let Some((key, (n, (_, t)))) = (*scope).captures.borrow().get_key_value(name)
-                    {
-                        break (key, (ValPath::Capture(vec![*n]), t.clone()));
-                    }
-                }
-                v.push(&(*scope).captures);
-                node = (*scope).next;
-            }
-        };
-
-        v.into_iter()
-            .rev()
-            .map(|x| (x.borrow_mut(), x.borrow().len() as u16))
-            .fold(path, |path, (mut hm, len)| {
-                hm.insert(key, (len, (path, t.clone())));
-                ValPath::Capture(vec![len])
-            });
-        self.get(name)
-    }
+struct Args<'a> {
+    type_decls: &'a mut Vec<TypeDecl>,
+    closures: &'a mut Vec<Closure>,
+    namescope: &'a mut NameScope,
+    type_consts: &'a mut Vec<TypeConstraint>,
+    errors: &'a mut Vec<Error>,
 }
 
 /// This code is a real mess, needs refactoring
@@ -190,112 +99,54 @@ fn binding_transform<'a, 'b>(
     order: u16,
     pat: Pattern,
     expr: Expr,
-    anon_funcs: &mut Vec<Closure>,
-    type_decls: &Vec<TypeDecl>,
-    scope: &mut Scope<'a, 'b>,
-    errors: &mut Vec<Error>,
+    is_rec: bool,
+    args: &mut Args<'a>,
 ) -> Result<(iExpr, BTreeMap<ValPath, ConstraintValue>, Type), Error> {
     let mut path = vec![order];
-    let mut local = HashMap::new();
-    let mut _captures = RefCell::new(HashMap::new()); // discarded
-    let mut type_consts = Vec::new();
     let mut val_consts = BTreeMap::new();
-    let next = {
-        let mut args = Args {
-            type_decls,
-            scope,
-            type_consts: &mut type_consts,
-            errors,
-        };
-        pat.transform(
+    // we don't insert directly into the scope because we want to do type inference
+    // before inserting finally
+    let expr = if is_rec {
+        args.namescope.push_layer();
+        let next = pat.transform(
             0,
             1,
             &mut path,
-            &mut args,
+            args,
             ValPath::StaticVal,
-            &mut local,
             &mut val_consts,
-        )
+        );
+        expr.transform(0, next, args).0
+    } else {
+        let next = pat.transform(
+            0,
+            1,
+            &mut path,
+            args,
+            ValPath::StaticVal,
+            &mut val_consts,
+        );
+        args.namescope.push_layer();
+        expr.transform(0, next, args).0
     };
-
-    let mut anon_tmp = Vec::new();
-    let (expr, local) = {
-        let mut scope = Scope {
-            local,
-            captures: _captures,
-            next: Some(scope),
-        };
-        let expr = {
-            let mut args = Args {
-                type_decls,
-                scope: &scope,
-                type_consts: &mut type_consts,
-                errors,
-            };
-            expr.transform(0, next, &mut args, &mut anon_tmp).0
-        };
-        let mut hm = HashMap::new();
-        mem::swap(&mut scope.local, &mut hm);
-        (expr, hm)
-    };
-
-    let mut map = unify::unify(type_consts)?;
-    for closure in &mut anon_tmp {
-        closure.substitute_types(&map);
-    }
-
-    anon_funcs.extend(anon_tmp);
-    scope.local.extend(local);
+    let mut type_consts = args.type_consts.drain(0..).collect();
+    let mut map = unify::unify(&mut type_consts)?;
+    let local = args.namescope.pop_layer();
+    args.namescope.extend_local(local);
 
     let mut t = Type::Variable(0);
     t.substitute_vars(&mut map);
     Ok((expr, val_consts, t))
 }
 
-/// transform a top-level function to imper_ast representaion,
-/// top-level functions can be recursive
-fn static_fn_transform<'a, 'b>(
-    name: &str,
-    order: u16,
-    fn_branches: Vec<(Vec<Pattern>, Expr)>,
-    anon_funcs: &mut Vec<Closure>,
-    type_decls: &Vec<TypeDecl>,
-    scope: &mut Scope<'a, 'b>,
-    errors: &mut Vec<Error>,
-) -> Result<Closure,Error> {
-    scope.local.insert(
-        name.to_string(),
-        (ValPath::StaticFn(order), Type::Variable(0)),
-    );
-    let mut type_consts = Vec::new();
-    let mut anon_tmp = Vec::new();
-    let mut result = {
-        let mut args = Args {
-            type_decls,
-            type_consts: &mut type_consts,
-            scope,
-            errors,
-        };
-        fn_transform(fn_branches, 0, 1, &mut args, &mut anon_tmp).0
-    };
-
-    let map = unify::unify(type_consts)?;
-    result.substitute_types(&map);
-    for closure in &mut anon_tmp {
-        closure.substitute_types(&map);
-    }
-    anon_funcs.extend(anon_tmp);
-    Ok(result)
-}
-
-fn get_type_decl<'a, 'b>(
+fn get_type_decl(
     name: String,
     vars: Vec<String>,
     variants: Vec<(String, ProtoType)>,
     type_map: &mut HashMap<String, u16>,
-    scope: &mut Scope<'a, 'b>,
+    namescope: &mut NameScope,
 ) -> TypeDecl {
-    let conver: HashMap<String, u16> = vars
+    let generics_map: HashMap<String, u16> = vars
         .into_iter()
         .enumerate()
         .map(|(i, s)| (s, i as u16))
@@ -304,13 +155,13 @@ fn get_type_decl<'a, 'b>(
     type_map.insert(name.clone(), len);
     TypeDecl {
         name,
-        num_generics: conver.len() as u16,
+        num_generics: generics_map.len() as u16,
         variants: variants
             .into_iter()
             .enumerate()
             .map(|(i, (s, t))| {
-                let t = to_type(t, type_map, &conver);
-                scope.local.insert(
+                let t = t.to_type(type_map, &generics_map);
+                namescope.local().insert(
                     s.clone(),
                     (
                         ValPath::Constructor,
@@ -327,13 +178,13 @@ fn get_type_decl<'a, 'b>(
     }
 }
 
-fn fn_transform<'a, 'b, 'c, 'd, 'e>(
+fn fn_transform<'a, 'b> (
     fn_branches: Vec<(Vec<Pattern>, Expr)>,
     var: u16,
     next: u16,
-    args: &mut Args<'a, 'b, 'c, 'd, 'e>,
-    anon_funcs: &mut Vec<Closure>,
-) -> (Closure, u16) {
+    args: &mut Args<'a>,
+) -> (u16, u16) {
+    // patterns per branch
     let len = fn_branches[0].0.len() as u16;
     debug_assert!(len > 0);
     args.type_consts
@@ -341,7 +192,7 @@ fn fn_transform<'a, 'b, 'c, 'd, 'e>(
     let mut nnext = next + len + 1;
     let mut dtree = DTree::new();
     let mut branches = Vec::new();
-    let mut captures = RefCell::new(HashMap::new());
+    args.namescope.push_layer();
     for (i, (pats, e)) in fn_branches.into_iter().enumerate().rev() {
         if pats.len() as u16 != len {
             args.errors.push(Error::VariablePatsNum);
@@ -349,7 +200,6 @@ fn fn_transform<'a, 'b, 'c, 'd, 'e>(
 
         let mut path = vec![];
         let mut val_consts = BTreeMap::new();
-        let mut local = HashMap::new();
         for (j, pat) in pats.into_iter().enumerate() {
             path.push(j as u16);
             pat.transform(
@@ -358,58 +208,53 @@ fn fn_transform<'a, 'b, 'c, 'd, 'e>(
                 &mut path,
                 args,
                 ValPath::Local,
-                &mut local,
                 &mut val_consts,
             );
             path.pop();
         }
         dtree.add_pattern(val_consts, i as u16);
-        let mut scope = Scope {
-            local,
-            captures,
-            next: Some(args.scope),
-        };
-        unsafe {
-            let mut reference: &'c Scope = mem::transmute::<&_, &'c _>(&scope);
-            mem::swap(&mut reference, &mut args.scope);
-            let (e, tmp) = e.transform(next + len, nnext, args, anon_funcs);
-            mem::swap(&mut reference, &mut args.scope);
-            branches.push(e);
-            nnext = tmp;
-        }
-        captures = RefCell::new(HashMap::new());
-        mem::swap(&mut captures, &mut scope.captures);
+        let (e, tmp) = e.transform(next + len, nnext, args);
+        branches.push(e);
+        nnext = tmp;
+        args.namescope.drain_local();
     }
-
-    let mut captures: Vec<_> = captures
-        .into_inner()
-        .into_iter()
-        .map(|(_, value)| value)
-        .collect();
+    let map = args.namescope.pop_layer();
+    let mut captures = Vec::new();
+    for (_, (val, t)) in map.into_iter() {
+        match val {
+            ValPath::CaptureCaptured(n, _) | ValPath::CaptureLocal(n, _) => captures.push((n, (val, t))),
+            _ => panic!("non capture not expected here"),
+        }
+    }
     captures.sort_unstable_by(|(ord1, _), (ord2, _)| ord1.cmp(ord2));
     let captures: Vec<(ValPath, Type)> = captures.into_iter().map(|(_, v)| v).collect();
+    let is_static = captures.is_empty();
+    args.closures.push(Closure {
+        captures,
+        dtree,
+        branches: branches.into_iter().rev().collect(),
+        args: (next..(next + len)).map(|n| Type::Variable(n)).collect(),
+        return_type: Type::Variable(next + len),
+    });
+    if is_static {
 
-    (
-        Closure {
-            captures,
-            dtree,
-            branches,
-            args: (next..(next + len)).map(|n| Type::Variable(n)).collect(),
-            return_type: Type::Variable(next + len),
-        },
-        nnext,
-    )
+    }
+
+    ((args.closures.len() - 1) as u16, nnext)
 }
 
 impl Pattern {
-    fn transform<'a, 'b, 'c, 'd, 'e, T: Fn(Vec<u16>) -> ValPath + Copy>(
+    /// parse a pattern and fill local with the name bindings, and val_consts with
+    /// value bindings.
+    /// ### RETURNS
+    /// next free variable
+    fn transform<'a, 'b, T: Fn(Vec<u16>) -> ValPath + Copy>(
         self,
-        var: u16,
+        var: u16,   
         next: u16,
         path: &mut Vec<u16>,
-        args: &mut Args<'a, 'b, 'c, 'd, 'e>,
-        fn2val_path: T,
-        local: &mut HashMap<String, (ValPath, Type)>,
+        args: &mut Args<'a>,
+        valpath_constructor: T,
         val_consts: &mut BTreeMap<ValPath, ConstraintValue>,
     ) -> u16 {
         match self {
@@ -419,19 +264,17 @@ impl Pattern {
                 if let Literal::Unit = l {
                     ()
                 } else {
-                    val_consts.insert(fn2val_path(path.clone()), l.get_constraint());
+                    val_consts.insert(valpath_constructor(path.clone()), l.get_constraint());
                 }
                 next
             }
-            Pattern::Bind(s) => match args.scope.local.get(&s) {
+            Pattern::Bind(s) => match args.namescope.local().get(&s) {
                 Some(_) => {
                     args.errors.push(Error::MultBindPattern(s));
-                    next
-                }
+                    next },
                 None => {
-                    local.insert(s, (fn2val_path(path.clone()), Type::Variable(var)));
-                    next
-                }
+                    args.namescope.local().insert(s, (valpath_constructor(path.clone()), Type::Variable(var)));
+                    next },
             },
             Pattern::Tuple(v) => {
                 let len = v.len() as u16;
@@ -440,34 +283,25 @@ impl Pattern {
                     Type::Variable(var),
                     Type::Tuple((next..nnext).map(|i| Type::Variable(i)).collect()),
                 ));
-                for (i, pat) in v.into_iter().enumerate() {
-                    let i = i as u16;
-                    path.push(i);
-                    nnext =
-                        pat.transform(next + i, nnext, path, args, fn2val_path, local, val_consts);
-                    path.pop();
+                for (i, pat) in v.into_iter().enumerate() { let i = i as u16; path.push(i); nnext = pat.transform(next + i, nnext, path, args, valpath_constructor, val_consts); path.pop();
                 }
                 nnext
             }
-            Pattern::SumVar(constructor, pat) => match args.scope.get(&constructor) {
+            Pattern::SumVar(constructor, pat) => match args.namescope.get(&constructor) {
                 None => {
                     args.errors.push(Error::ConstructorNotFound(constructor));
                     next
                 }
-                Some(ni) => if let Type::Constructor {
-                    ref arg,
-                    target,
-                    position,
-                } = ni.1
-                {
-                    path.push(0);
+                Some(ni) => if let Type::Constructor { ref arg, target, position } = ni.1 {
                     let t = &args.type_decls[target as usize];
+                    // The value constraint for the tag
                     val_consts.insert(
-                        fn2val_path(path.clone()),
+                        valpath_constructor({let mut p = path.clone(); p.push(0); p}),
+                        // position starts from 1 but need 0 indexing
                         ConstraintValue::Finite(position, t.variants.len() as u16),
                     );
 
-                    let (from, n1) = gen2var(arg, next + 1);
+                    let (from, n1) = arg.instantiate(next + 1);
                     let (to, n2) = (
                         Type::Sum(
                             target,
@@ -482,13 +316,13 @@ impl Pattern {
                     args.type_consts.push((Type::Variable(var), to));
                     args.type_consts.push((Type::Variable(next), from));
                     path.push(position);
+                    debug_assert!(n2 > n1);
                     let next = pat.transform(
                         next,
-                        max(n1, n2),
+                        n2,
                         path,
                         args,
-                        fn2val_path,
-                        local,
+                        valpath_constructor,
                         val_consts,
                     );
                     path.pop();
@@ -503,22 +337,20 @@ impl Pattern {
 }
 
 impl Expr {
-    fn transform<'a, 'b, 'c, 'd, 'e>(
+    fn transform<'a, 'b>(
         self,
         var: u16,
         next: u16,
-        args: &mut Args<'a, 'b, 'c, 'd, 'e>,
-        anon_funcs: &mut Vec<Closure>,
+        args: &mut Args<'a>,
     ) -> (iExpr, u16) {
         let sequence = |e1: Expr,
                         e2: Expr,
                         var1,
                         var2,
                         next,
-                        args: &mut Args<'a, 'b, 'c, 'd, 'e>,
-                        anon_funcs: &mut Vec<Closure>| {
-            let (e1, next) = e1.transform(var1, next, args, anon_funcs);
-            let (e2, next) = e2.transform(var2, next, args, anon_funcs);
+                        args: &mut Args<'a>| {
+            let (e1, next) = e1.transform(var1, next, args);
+            let (e2, next) = e2.transform(var2, next, args);
             (e1, e2, next)
         };
         match self {
@@ -526,7 +358,7 @@ impl Expr {
                 args.type_consts.push((Type::Variable(var), l.get_type()));
                 (iExpr::Literal(l), next)
             }
-            Expr::Bound(s) => match args.scope.get(&s) {
+            Expr::Bound(s) => match args.namescope.get(&s) {
                 Some(ni) => {
                     let (path, t) = &*ni;
                     args.type_consts.push((Type::Variable(var), t.clone()));
@@ -542,36 +374,35 @@ impl Expr {
                 let (e1, e2, next) = match op {
                     Add | Sub | Mul | Div | Mod => {
                         args.type_consts.push((Type::Variable(var), Type::Int));
-                        sequence(*e1, *e2, var, var, next, args, anon_funcs)
+                        sequence(*e1, *e2, var, var, next, args)
                     }
                     Greater | Less | GreaterEq | LessEq => {
                         args.type_consts.push((Type::Variable(var), Type::Bool));
                         args.type_consts.push((Type::Variable(next), Type::Int));
-                        sequence(*e1, *e2, next, next, next + 1, args, anon_funcs)
+                        sequence(*e1, *e2, next, next, next + 1, args)
                     }
                     Equal | NotEq => {
                         args.type_consts.push((Type::Variable(var), Type::Bool));
-                        sequence(*e1, *e2, next, next, next + 1, args, anon_funcs)
+                        sequence(*e1, *e2, next, next, next + 1, args)
                     }
                     And | Or => {
                         args.type_consts.push((Type::Variable(var), Type::Bool));
-                        sequence(*e1, *e2, var, var, next, args, anon_funcs)
+                        sequence(*e1, *e2, var, var, next, args)
                     }
                 };
                 (iExpr::BinOp(Box::new(e1), op, Box::new(e2)), next)
             }
             Expr::UnOp(UnOpcode::Minus, e) => {
                 args.type_consts.push((Type::Variable(var), Type::Int));
-                let (e, next) = e.transform(var, next, args, anon_funcs);
+                let (e, next) = e.transform(var, next, args);
                 (iExpr::UnOp(UnOpcode::Minus, Box::new(e)), next)
             }
             Expr::UnOp(UnOpcode::Not, e) => {
                 args.type_consts.push((Type::Variable(var), Type::Bool));
-                let (e, next) = e.transform(var, next, args, anon_funcs);
-                (iExpr::UnOp(UnOpcode::Minus, Box::new(e)), next)
+                let (e, next) = e.transform(var, next, args);
+                (iExpr::UnOp(UnOpcode::Not, Box::new(e)), next)
             }
             Expr::Tuple(v) => {
-                let mut v2 = Vec::new();
                 let mut nnext = next + v.len() as u16;
                 args.type_consts.push((
                     Type::Variable(var),
@@ -581,8 +412,10 @@ impl Expr {
                             .collect(),
                     ),
                 ));
+                let mut v2 = Vec::new();
                 for (i, e) in v.into_iter().enumerate() {
-                    let (e, next) = e.transform(next + i as u16, nnext, args, anon_funcs);
+                    // the rhs next is not the outer next, otherwise cannot update mutable nnext
+                    let (e, next) = e.transform(next + i as u16, nnext, args);
                     v2.push(e);
                     nnext = next;
                 }
@@ -596,22 +429,21 @@ impl Expr {
                         Box::new(Type::Variable(var)),
                     ),
                 ));
-                let (e1, e2, next) = sequence(*e1, *e2, next, next, next + 1, args, anon_funcs);
+                let (e1, e2, next) = sequence(*e1, *e2, next, next + 1, next + 2, args);
                 (iExpr::Application(Box::new(e1), Box::new(e2)), next)
             }
             Expr::Conditional(cond, e1, e2) => {
                 args.type_consts.push((Type::Variable(next), Type::Bool));
-                let (cond, next) = cond.transform(next, next + 1, args, anon_funcs);
-                let (e1, e2, next) = sequence(*e1, *e2, var, var, next, args, anon_funcs);
+                let (cond, next) = cond.transform(next, next + 1, args);
+                let (e1, e2, next) = sequence(*e1, *e2, var, var, next, args);
                 (
                     iExpr::Conditional(Box::new(cond), Box::new(e1), Box::new(e2)),
                     next,
                 )
             }
-            Expr::Function(v) => {
-                let (closure, next) = fn_transform(v, next, next + 1, args, anon_funcs);
-                anon_funcs.push(closure);
-                (iExpr::Closure(anon_funcs.len() as u16 - 1), next)
+            Expr::Closure(v) => {
+                let (idx, next) = fn_transform(v, next, next + 1, args);
+                (iExpr::Closure(idx), next)
             }
         }
     }

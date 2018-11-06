@@ -13,11 +13,8 @@ pub enum Binding {
         vars: Vec<String>,
         /// variants' names and arguments' types
         variants: Vec<(String, ProtoType)> },
-    Value(Pattern, Expr),
-    Function {
-        name: String,
-        variants: Vec<(Vec<Pattern>, Expr)>,
-    }
+    /// bool for is recursive?
+    Value(Pattern, Expr, bool),
 }
 
 /// A pattern or LHS of a binding to match
@@ -50,8 +47,8 @@ pub enum Expr {
     /// the value of applying a unary operation on an Expr
     UnOp(UnOpcode, Box<Expr>),
 
-    /// A function is a sequence of patterns and corresponsing expressions
-    Function(Vec<(Vec<Pattern>, Expr)>),
+    /// A closure is a sequence of patterns and corresponsing expressions
+    Closure(Vec<(Vec<Pattern>, Expr)>),
     /// Apply an expression on an expression
     Application(Box<Expr>, Box<Expr>),
     /// if e1 then e2 else e3

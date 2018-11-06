@@ -1,7 +1,8 @@
 [package]
 name = "mylang"
 version = "0.1.0"
-authors = ["Mohammed Alateyya"]
+authors = ["Mohammed Alateyya <mnur@cmu.edu>"]
+edition = "2018"
 
 [build-dependencies]
 lalrpop = "0.16"

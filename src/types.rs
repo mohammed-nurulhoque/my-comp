@@ -11,7 +11,7 @@ pub enum ProtoType {
     Generic(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Unit,
     Int, Bool, String,
@@ -20,7 +20,8 @@ pub enum Type {
         arg: Box<Type>,
         /// target type in a global types vector
         target: u16,
-        /// position among the constructors of the same type
+        /// position among the constructors of the same type starting from 1
+        /// because path.0 is reserved for tag in ValuePath
         position: u16,
     },
     Function(Box<Type>, Box<Type>),
@@ -78,7 +79,8 @@ pub enum UnOpcode {
 impl ProtoType {
     pub fn to_type(
         self,
-        map: &HashMap<String, u16>, // map of type names -> index in types vector
+        type_map: &HashMap<String, u16>, // map of type names -> index in types vector
+        generics_map: &HashMap<String, u16>,
     ) -> Type {
         use self::ProtoType as P;
         use self::Type as T;
@@ -87,17 +89,17 @@ impl ProtoType {
             P::Int => T::Int,
             P::Bool => T::Bool,
             P::String => T::String,
-            P::Tuple(v) => T::Tuple(v.into_iter().map(|t| t.to_type(map)).collect()),
+            P::Tuple(v) => T::Tuple(v.into_iter().map(|t| t.to_type(type_map, generics_map)).collect()),
             P::Function(from, to) => T::Function(
-                Box::new(from.to_type(map)),
-                Box::new(to.to_type(map)),
+                Box::new(from.to_type(type_map, generics_map)),
+                Box::new(to.to_type(type_map, generics_map)),
             ),
-            P::Generic(name) => match map.get(&name) {
+            P::Generic(name) => match generics_map.get(&name) {
                 Some(&n) => T::Generic(n),
                 None => panic!("Error, generic not found"),
             },
-            P::Sum(name, t) => match map.get(&name) {
-                Some(&n) => T::Sum(n, Box::new(t.to_type(map))),
+            P::Sum(name, t) => match type_map.get(&name) {
+                Some(&n) => T::Sum(n, Box::new(t.to_type(type_map, generics_map))),
                 None => panic!("should be error type not defined"),
             },
         }
@@ -108,7 +110,7 @@ impl Type {
     /// instantiate a type by substituting generics with variables
     /// starting from var, 
     /// Generic(n) => Variable(var + n)
-    /// # RETURNS
+    /// ### RETURNS
     /// instantiated type and next free variable
     pub fn instantiate(&self, var: u16) -> (Type, u16) {
         match *self {

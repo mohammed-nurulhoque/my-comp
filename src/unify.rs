@@ -2,13 +2,10 @@
 //! This module implements the unification algorithm for Hindly-Milner type inference
 
 use std::collections::HashMap;
-use types::Type;
-
-#[derive(Debug)]
-pub enum Error {
-    TypeMismatch(Type, Type),
-    ConstructorUnification,
-}
+use crate::{
+    types::Type,
+    error::Error
+};
 
 #[cfg(test)]
 mod test {
@@ -17,8 +14,8 @@ mod test {
 
     #[test]
     fn test_simple() {
-        let consts = vec![(Variable(1), Int), (Variable(0), Variable(1))];
-        let map = unify(consts).unwrap();
+        let mut consts = vec![(Variable(1), Int), (Variable(0), Variable(1))];
+        let map = unify(&mut consts).unwrap();
         assert_eq!(map[&0], Variable(1));
         assert_eq!(map[&1], Int);
 
@@ -29,7 +26,7 @@ mod test {
 
     #[test]
     fn test_unify_simple() {
-        let consts = vec![
+        let mut consts = vec![
             (
                 Variable(0),
                 Function(Box::new(Variable(1)), Box::new(Variable(6))),
@@ -51,7 +48,7 @@ mod test {
             ),
             (Variable(3), Int),
         ];
-        let map = unify(consts);
+        let map = unify(&mut consts);
         assert!(map.is_ok());
         let map = map.unwrap();
         assert_eq!(map[&3], Int);
@@ -71,7 +68,7 @@ mod test {
     #[test]
     fn test_unify_fold() {
         // see consts.txt for derivation
-        let consts = vec![
+        let mut consts = vec![
             (
                 Variable(0),
                 Function(
@@ -109,7 +106,7 @@ mod test {
             ),
             (Variable(13), Variable(0)),
         ];
-        let map = unify(consts).unwrap();
+        let map = unify(&mut consts).unwrap();
 
         let mut f_type = Variable(1);
         f_type.substitute_vars(&map);
@@ -176,7 +173,7 @@ impl Type {
 }
 
 /// Hindly-Milner unification
-pub fn unify(mut consts: Vec<(Type, Type)>) -> Result<HashMap<u16, Type>, Error> {
+pub fn unify(consts: &mut Vec<(Type, Type)>) -> Result<HashMap<u16, Type>, Error> {
     let mut map = HashMap::new();
     // FIXME: don't return immediately at error, keep unifying
     while consts.len() > 0 {
@@ -188,7 +185,7 @@ pub fn unify(mut consts: Vec<(Type, Type)>) -> Result<HashMap<u16, Type>, Error>
             (Type::Variable(n), Type::Variable(m)) if n == m => (),
             (Type::Variable(n), l) | (l, Type::Variable(n)) => {
                 map.insert(n, l);
-                for (tl, tr) in &mut consts {
+                for (tl, tr) in consts.iter_mut() {
                     tl.substitute_vars(&map);
                     tr.substitute_vars(&map);
                 }

@@ -1,5 +1,7 @@
-use {ast::*};
-use types::{ProtoType, Literal, BinOpcode, UnOpcode};
+use crate::{
+    ast::*,
+    types::{ProtoType, Literal, BinOpcode, UnOpcode}
+};
 grammar;
 
 pub Program: Vec<Binding> = {
@@ -31,15 +33,27 @@ SumVarDecl = {
 };
 
 Binding: Binding = {
-    <Pattern> "=" <Expr> ";" => Binding::Value(<>),
+    <Pattern> "=" <Expr> ";" => Binding::Value(<>, false),
 };
 
 FnBinding: Binding = {
-    "fn" <name:ID> "=" <variants:Arm+> ";" => Binding::Function {<>},
+    "fn" <name:ID> "=" <v:Arms> => Binding::Value(Pattern::Bind(name), Expr::Closure(v), false),
+    "rec" "fn" <name:ID> "=" <v:Arms> => Binding::Value(Pattern::Bind(name), Expr::Closure(v), true),
+};
+
+Arms: Vec<(Vec<Pattern>, Expr)> = {
+    "{" <arm:Arm> "}" => vec![arm],
+    "{" <v:(<Arm> ",")+> <last:Arm?> "}" => {
+        let mut v = v;
+        if let Some(arm) = last {
+            v.push(arm);
+        }
+        v
+    },
 };
 
 Arm = {
-    "|" <Pattern+> "=>" <Expr>,
+    <Pattern+> "=>" <Expr>,
 };
 
 Pattern: Pattern = {
@@ -94,11 +108,7 @@ pub Expr: Expr = {
     "if" <cond:Expr> "then" <a:Expr> "else" <b:Expr> ";" => {
         Expr::Conditional(Box::new(cond), Box::new(a), Box::new(b))
     },
-    "fn" "(" <v:(<Arm> ",")+> <last:Arm> ")" => {
-        let mut v = v;
-        v.push(last);
-        Expr::Function(v)
-    },
+    "fn" "{" <v:Arms> "}" => Expr::Closure(v),
     Expr0,
 };
 

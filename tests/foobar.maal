@@ -1,22 +1,52 @@
 type Tree t =
     | leaf ()
     | node (Tree t, t, Tree t)
-    ;
+
 
 type List t =
     | nil ()
     | cons (t, List t)
-    ;
 
-fn append =
-    | (nil (), right) => right
-    | (cons (x, left), right) => cons(x, append (left, right))
-    ;
 
-fn inorder =
-    | (leaf ()) => nil ()
-    | (node (left, v, right)) => append (inorder left, cons (v, inorder right))
-    ;
+rec fn append = {
+    (nil (), right) => right,
+    (cons (x, left), right) => cons(x, append (left, right)),
+}
+
+rec fn inorder = {
+    (leaf ()) => nil (),
+    (node (left, v, right)) => append (inorder left, cons (v, inorder right)),
+}
+
+fn square = {
+    x => x * x
+}
+
+/*
+ * fn square x = x * x;
+ */
+
+rec fn foo = {
+    (nil ()) => 0,
+    (cons (x, L)) => x + bar L,
+} and bar = {
+    (nil ()) => 0,
+    (cons (x, L)) => x - foo L,
+}
+
+fn foobar = {
+    0 => 0
+    i => func i + foobar (i - 1)
+} where {
+    func x = x * 2;
+}
+
+fn foobar = {
+    0 => 0
+    i => func i + foobar (i - 1) where {
+        func x = x * 2;
+    }
+}
 
 x = inorder (leaf ());
 x = (true, false);

@@ -30,9 +30,11 @@
 //! When T = exit or empty reached:
 //!     replace with signular(C, tail = exit(i), default = T)
 
-use imper_ast::ConstraintValue;
-use imper_ast::ValPath;
 use std::collections::{BTreeMap, HashMap};
+use crate::{
+    imper_ast::ConstraintValue,
+    imper_ast::ValPath,
+};
 
 #[cfg(test)]
 mod test {
@@ -186,7 +188,8 @@ impl DTree {
     }
 
     /// modify the tree to match the exit pattern when the constraints in map are met
-    /// REQUIRES exit has higher precedence that patterns in self
+    /// ### REQUIRES
+    /// exit has higher precedence that patterns in self
     pub fn add_pattern(&mut self, mut map: BTreeMap<ValPath, ConstraintValue>, exit: u16) {
         use self::DTree::*;
         match *self {
@@ -210,9 +213,10 @@ impl DTree {
                 // if let _ = branches.get_mut() { add pattern } else { insert branch }
                 // but branches remains borrowed in else part, hence this structure
                 if let Some(dtree) = branches.get_mut(&key) {
-                    return dtree.add_pattern(map, exit);
+                    dtree.add_pattern(map, exit);
+                } else {
+                    branches.insert(key, Self::make_tree(&map, Exit(exit), &DTree::Empty));
                 }
-                branches.insert(key, Self::make_tree(&map, Exit(exit), &DTree::Empty));
             }
             Infinite { ref mut branches, ref mut default, .. } => {
                 for branch in branches.values_mut() {
