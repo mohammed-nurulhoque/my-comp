@@ -7,8 +7,10 @@ use std::collections::{
     HashMap,
     BTreeMap,
 };
-use dtree::DTree;
-use types::{Type, Literal, BinOpcode, UnOpcode};
+use crate::{
+    dtree::DTree,
+    types::{Type, Literal, BinOpcode, UnOpcode},
+};
 
 /// represents a compilation module (a single file)
 pub struct Module {

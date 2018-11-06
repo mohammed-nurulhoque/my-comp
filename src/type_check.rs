@@ -19,7 +19,7 @@ mod test {
     #[test]
 
     fn test_mk_curried() {
-        use types::Type::{ Function, Variable };
+        use super::Type::{ Function, Variable };
         let t = super::mk_curried_type(5, 5);
         assert_eq!(t, Function(
             Box::new(Variable(5)), 

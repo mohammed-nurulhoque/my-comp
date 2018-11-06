@@ -1,4 +1,3 @@
-extern crate mylang;
 use mylang::grammar::{
     ExprParser,
 };
