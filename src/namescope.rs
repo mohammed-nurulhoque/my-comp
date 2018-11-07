@@ -15,7 +15,7 @@ mod tests {
     use std::iter::FromIterator;
     #[test]
     fn test() {
-        let mut ns0 = NameScope { head: Some(Box::new(ScopeList {
+        let ns0 = NameScope { head: Some(Box::new(ScopeList {
             local: HashMap::from_iter(vec![
                 ("foxbar".to_string(), (ValPath::Constructor, Type::Bool)),
                 ("cnnbar".to_string(), (ValPath::Local(vec![0]), Type::Bool)),
@@ -23,7 +23,7 @@ mod tests {
             captures_sz: 0,
             parent: NameScope { head: None },
         }))};
-        let mut ns1 = NameScope { head: Some(Box::new(ScopeList {
+        let ns1 = NameScope { head: Some(Box::new(ScopeList {
             local: HashMap::from_iter(vec![
                 ("bar".to_string(), (ValPath::Local(vec![0]), Type::Bool)),
                 ("foobar".to_string(), (ValPath::CaptureLocal(0, vec![0]), Type::Bool)),

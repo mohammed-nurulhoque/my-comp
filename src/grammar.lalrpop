@@ -14,6 +14,26 @@ Statement: Binding = {
     FnBinding,
 }
 
+Comma<T> : Vec<T> = {
+    <T> => vec![<>],
+    <v: (<T> ",")+> <last: T?> => {
+        let mut v = v;
+        if let Some(e) = last {
+            v.push(e);
+        }
+        v
+    }
+}
+
+// at least 2 elements
+Comma2<T>: Vec<T> = {
+    <v: (<T> ",")+> <last: T> ","? => {
+        let mut v = v;
+        v.push(last);
+        v
+    }
+}
+
 TypeDecl: Binding = {
     "type" <name:ID> <vars:TypeVars> "=" <variants:SumVarDecl+> ";" => Binding::Type {<>},
 };
@@ -21,14 +41,10 @@ TypeDecl: Binding = {
 TypeVars: Vec<String> = {
     "()" => vec![],
     ID => vec![<>],
-    "(" <v:(<ID> ",")+> <last:ID> ")" => {
-        let mut v = v;
-        v.push(last);
-        v
-    },
+    "(" <Comma<ID>> ")",
 }
 
-SumVarDecl = {
+SumVarDecl: (String, ProtoType) = {
     "|" <ID> <Type>,
 };
 
@@ -37,19 +53,8 @@ Binding: Binding = {
 };
 
 FnBinding: Binding = {
-    "fn" <name:ID> "=" <v:Arms> => Binding::Value(Pattern::Bind(name), Expr::Closure(v), false),
-    "rec" "fn" <name:ID> "=" <v:Arms> => Binding::Value(Pattern::Bind(name), Expr::Closure(v), true),
-};
-
-Arms: Vec<(Vec<Pattern>, Expr)> = {
-    "{" <arm:Arm> "}" => vec![arm],
-    "{" <v:(<Arm> ",")+> <last:Arm?> "}" => {
-        let mut v = v;
-        if let Some(arm) = last {
-            v.push(arm);
-        }
-        v
-    },
+    "fn" <name:ID> "=" "{" <v:Comma<Arm>> "}" => Binding::Value(Pattern::Bind(name), Expr::Closure(v), false),
+    "rec" "fn" <name:ID> "=" "{" <v:Comma<Arm>> "}" => Binding::Value(Pattern::Bind(name), Expr::Closure(v), true),
 };
 
 Arm = {
@@ -60,11 +65,7 @@ Pattern: Pattern = {
     Literal => Pattern::Literal(<>),
     "_" => Pattern::Wild,
     ID => Pattern::Bind(<>),
-    "(" <v:(<PatternH> ",")+> <last:PatternH> ")" => {
-        let mut v = v;
-        v.push(last);
-        Pattern::Tuple(v)
-    },
+    "(" <v:Comma2<PatternH>> ")" => Pattern::Tuple(v),
     "(" <PatternH> ")",
 };
 
@@ -97,18 +98,14 @@ SimpleType: ProtoType = {
     "(" <Type> ")",
     <ID> => ProtoType::Generic(<>),
     <name:ID> <tp:SimpleType> => ProtoType::Sum(name, Box::new(tp)),
-    "(" <v:(<Type> ",")+> <t: Type> ")" => {
-        let mut v = v;
-        v.push(t);
-        ProtoType::Tuple(v)
-    },
+    "(" <Comma2<Type>> ")" => ProtoType::Tuple(<>),
 };
 
 pub Expr: Expr = {
-    "if" <cond:Expr> "then" <a:Expr> "else" <b:Expr> ";" => {
+    "if" <cond:Expr> "then" <a:Expr> "else" <b:Expr> "end" => {
         Expr::Conditional(Box::new(cond), Box::new(a), Box::new(b))
     },
-    "fn" "{" <v:Arms> "}" => Expr::Closure(v),
+    "fn" "{" <v:Comma<Arm>> "}" => Expr::Closure(v),
     Expr0,
 };
 
@@ -132,17 +129,13 @@ Term: Expr  = {
 Base: Expr = {
     <Literal> => Expr::Literal(<>),
     <bound:ID> => Expr::Bound(bound),
-    "(" <v:(<Expr> ",")+> <last:Expr> ")" => {
-        let mut v = v;
-        v.push(last);
-        Expr::Tuple(v)
-    },
+    "(" <Comma2<Expr>> ")" => Expr::Tuple(<>),
     "(" <Expr> ")",
 };
 
 Literal: Literal = {
     r#""(\\.|[^"\\])*""# => Literal::String(<>[1..(<>.len()-1)].to_string()),
-    r"-?[1-9][0-9]*" => Literal::Int(isize::from_str_radix(<>, 10).unwrap()),
+    r"-?[0-9]+" => Literal::Int(isize::from_str_radix(<>, 10).unwrap()),
     "true" => Literal::Bool(true),
     "false" => Literal::Bool(false),
     "()" => Literal::Unit,

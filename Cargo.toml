@@ -5,8 +5,8 @@ authors = ["Mohammed Alateyya <mnur@cmu.edu>"]
 edition = "2018"
 
 [build-dependencies]
-lalrpop = "0.16"
+lalrpop = "0.16.1"
 
 [dependencies]
-lalrpop-util = "0.16"
+lalrpop-util = "0.16.1"
 regex = "1.0.5"

@@ -49,15 +49,14 @@ pub fn ast2imper_ast(bindings: Vec<Binding>) -> Result<Module, Error> {
     let mut type_decls = Vec::new();
     let mut type_consts = Vec::new();
     let mut val_order = 0;
-
+    let mut args = Args {
+        type_decls: &mut type_decls,
+        closures: &mut closures,
+        namescope: &mut global_scope,
+        type_consts: &mut type_consts,
+        errors: &mut errors,
+    };
     for binding in bindings {
-        let mut args = Args {
-            type_decls: &mut type_decls,
-            closures: &mut closures,
-            namescope: &mut global_scope,
-            type_consts: &mut type_consts,
-            errors: &mut errors,
-        };
         match binding {
             Binding::Type { name, vars, variants,} => args.type_decls.push(
                 get_type_decl(name, vars, variants, &mut type_map, args.namescope,
@@ -453,7 +452,7 @@ impl Expr {
 /// count > 0
 fn mk_curried_type(from: u16, count: u16) -> Type {
     let mut t = Type::Variable(from + count - 1);
-    for i in (from..(count - 1)).rev() {
+    for i in (from..(from + count - 1)).rev() {
         t = Type::Function(Box::new(Type::Variable(i)), Box::new(t));
     }
     t

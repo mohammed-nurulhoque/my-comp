@@ -10,10 +10,10 @@ mod test {
         },
     };
     #[test]
-    fn test () {
+    fn test_parser () {
         //use mylang::{ast::*, types::*};
         let parser = grammar::ProgramParser::new();
-        let mut f = File::open("tests/foobar.maal").expect("file not found");
+        let mut f = File::open("tests/test.test").expect("file not found");
         let mut contents = String::new();
         f.read_to_string(&mut contents)
             .expect("Cannot read file");
