@@ -16,11 +16,11 @@ use crate::{
 
 #[cfg(test)]
 mod test {
+    use super::*;
     #[test]
-
     fn test_mk_curried() {
-        use super::Type::{ Function, Variable };
-        let t = super::mk_curried_type(5, 5);
+        use self::Type::{ Function, Variable };
+        let t = mk_curried_type(5, 5);
         assert_eq!(t, Function(
             Box::new(Variable(5)), 
             Box::new(Function(
@@ -34,6 +34,85 @@ mod test {
                 ))
             ))
         ));
+    }
+
+    #[test]
+    fn test_get_type_decl() {
+        let vars = vec!["T".to_string()];
+        let variants = vec![
+            ("Nil".to_string(), ProtoType::Unit), 
+            ("Node".to_string(), ProtoType::Tuple(vec![
+                ProtoType::Sum("List".to_string(), Box::new(ProtoType::Generic("T".to_string()))),
+                ProtoType::Sum("List".to_string(), 
+                    Box::new(ProtoType::Sum("BTree".to_string(), Box::new(ProtoType::Generic("T".to_string()))))),
+            ]))];
+        let mut type_map = vec![("List".to_string(), 0)].into_iter().collect();
+        let mut ns = NameScope::new();
+        let dec = get_type_decl("BTree".to_string(), vars, variants, &mut type_map, &mut ns);
+        assert_eq!(dec.name, "BTree");
+        assert_eq!(dec.num_generics, 1);
+        assert_eq!(dec.variants, vec![("Nil".to_string(), Type::Unit), ("Node".to_string(), Type::Tuple(vec![
+            Type::Sum(0, vec!(Type::Generic(0))),
+            Type::Sum(0, vec!(Type::Sum(1, vec!(Type::Generic(0)))))
+        ]))]);
+        assert_eq!(type_map["BTree"], 1);
+        assert_eq!(ns.get("Nil").unwrap(), &(ValPath::Constructor, Type::Constructor {
+            target: 1,
+            position: 1,
+        }));
+        assert_eq!(ns.get("Node").unwrap(), &(ValPath::Constructor, Type::Constructor {
+            target: 1,
+            position: 2,
+        }));
+    }
+
+    #[test]
+    fn test_pattern() {
+        use std::mem::transmute;
+        use self::Pattern::*;
+        let pat = Tuple(vec![
+            SumVar("cons".to_string(), Box::new(Tuple(vec![
+                Bind("x".to_string()), Bind("L1".to_string())
+            ]))),
+            SumVar("cons".to_string(), Box::new(Tuple(vec![
+                Bind("y".to_string()), Bind("L2".to_string())
+            ]))),
+        ]);
+        let mut ns = NameScope::new();
+        ns.local().insert("cons".to_string(), (ValPath::Constructor, Type::Constructor {
+            position: 2 as u16,
+            target: 0,
+        }));
+        let mut errors = Vec::new();
+        let mut type_consts = Vec::new();
+        let mut val_consts = BTreeMap::new();
+        let mut type_decls = vec![TypeDecl {
+            name: "List".to_string(),
+            num_generics: 1,
+            variants: vec![
+                ("nil".to_string(), Type::Unit),
+                ("cons".to_string(), Type::Tuple(vec![
+                    Type::Generic(0), 
+                    Type::Sum(0, vec!(Type::Generic(0))),
+                ]))
+            ],
+        }];
+        let mut path = vec![1];
+        let mut args = unsafe { Args {
+            namescope: &mut ns,
+            errors: &mut errors,
+            type_consts: &mut type_consts,
+            type_decls: &mut type_decls,
+            closures: transmute::<usize,&mut Vec<Closure>>(0),
+        }};
+        pat.transform(10, 20, &mut path, &mut args, ValPath::Local, &mut val_consts);
+        assert_eq!(args.namescope.get("x").unwrap(), &(ValPath::Local(vec![1,0,2,0]), Type::Variable(24)));
+        assert_eq!(args.namescope.get("L1").unwrap(), &(ValPath::Local(vec![1,0,2,1]), Type::Variable(25)));
+        assert_eq!(args.namescope.get("y").unwrap(), &(ValPath::Local(vec![1,1,2,0]), Type::Variable(28)));
+        assert_eq!(args.namescope.get("L2").unwrap(), &(ValPath::Local(vec![1,1,2,1]), Type::Variable(29)));
+        assert!(args.errors.is_empty());
+        assert_eq!(path, &[1]);
+        println!("{:?}", args.type_consts);
     }
 }
 /// The transformation function, takes a series of bindings in AST form,
@@ -165,7 +244,6 @@ fn get_type_decl(
                     (
                         ValPath::Constructor,
                         Type::Constructor {
-                            arg: Box::new(t.clone()),
                             target: len,
                             position: (i + 1) as u16,
                         },
@@ -291,7 +369,7 @@ impl Pattern {
                     args.errors.push(Error::ConstructorNotFound(constructor));
                     next
                 }
-                Some(ni) => if let Type::Constructor { ref arg, target, position } = ni.1 {
+                Some(ni) => if let Type::Constructor { target, position } = ni.1 {
                     let t = &args.type_decls[target as usize];
                     // The value constraint for the tag
                     val_consts.insert(
@@ -300,22 +378,20 @@ impl Pattern {
                         ConstraintValue::Finite(position, t.variants.len() as u16),
                     );
 
-                    let (from, n1) = arg.instantiate(next + 1);
+                    let (from, n1) = t.variants[position as usize - 1].1.instantiate(next + 1);
                     let (to, n2) = (
                         Type::Sum(
                             target,
-                            Box::new(Type::Tuple(
-                                (0..t.num_generics)
-                                    .map(|n| Type::Variable(next + 1 + n))
-                                    .collect(),
-                            )),
+                            (0..t.num_generics)
+                                .map(|n| Type::Variable(next + 1 + n))
+                                .collect(),
                         ),
                         next + 1 + t.num_generics,
                     );
                     args.type_consts.push((Type::Variable(var), to));
                     args.type_consts.push((Type::Variable(next), from));
                     path.push(position);
-                    debug_assert!(n2 > n1);
+                    debug_assert!(n2 >= n1);
                     let next = pat.transform(
                         next,
                         n2,

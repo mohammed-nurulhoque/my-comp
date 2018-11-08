@@ -79,9 +79,9 @@ mod test {
                     )),
                 ),
             ),
-            (Variable(3), Sum(0, Box::new(Variable(5)))),
+            (Variable(3), Sum(0, vec![Variable(5)])),
             (Variable(4), Variable(2)),
-            (Variable(3), Sum(0, Box::new(Variable(6)))),
+            (Variable(3), Sum(0, vec![Variable(6)])),
             (
                 Variable(7),
                 Function(Box::new(Variable(8)), Box::new(Variable(4))),
@@ -92,7 +92,7 @@ mod test {
             (
                 Variable(11),
                 Function(
-                    Box::new(Sum(0, Box::new(Variable(6)))),
+                    Box::new(Sum(0, vec![Variable(6)])),
                     Box::new(Variable(10)),
                 ),
             ),
@@ -132,7 +132,7 @@ mod test {
                 Box::new(Function(
                     Box::new(Generic(1)),
                     Box::new(Function(
-                        Box::new(Sum(0, Box::new(Generic(0)))),
+                        Box::new(Sum(0, vec![Generic(0)])),
                         Box::new(Generic(1))
                     ))
                 ))
@@ -144,26 +144,23 @@ mod test {
 impl Type {
     /// given a map from variables to types, substitute variable types in self with
     /// the corresponding types from map. The substituted-with types can themselves
-    /// have substitutable variables so we recurese
+    /// have substitutable variables so we recures
     /// # REQUIRES
     /// no cycles in substitutions map
     pub fn substitute_vars(&mut self, map: &HashMap<u16, Type>) {
         match *self {
-            Type::Int | Type::Bool | Type::String | Type::Unit | Type::Generic(_) => (),
+            Type::Int | Type::Bool | Type::String | Type::Unit | Type::Generic(_) | Type::Constructor {..} => (),
             Type::Variable(n) => {
                 if let Some(t) = map.get(&n) {
                     *self = t.clone();
                     self.substitute_vars(map);
                 }
             }
-            Type::Constructor { arg: ref mut t, .. } | Type::Sum(_, ref mut t) => {
-                t.substitute_vars(map)
-            }
             Type::Function(ref mut from, ref mut to) => {
                 from.substitute_vars(map);
                 to.substitute_vars(map);
             }
-            Type::Tuple(ref mut v) => {
+            Type::Tuple(ref mut v) | Type::Sum(_, ref mut v) => {
                 for t in v {
                     t.substitute_vars(map);
                 }
@@ -177,19 +174,16 @@ pub fn unify(consts: &mut Vec<(Type, Type)>) -> Result<HashMap<u16, Type>, Error
     let mut map = HashMap::new();
     // FIXME: don't return immediately at error, keep unifying
     while consts.len() > 0 {
-        match consts.pop().unwrap() {
+        let (mut tl, mut tr) = consts.pop().unwrap();
+        tl.substitute_vars(&map); 
+        tr.substitute_vars(&map);
+        match  (tl, tr) {
             (Type::Int, Type::Int)
             | (Type::Bool, Type::Bool)
             | (Type::Unit, Type::Unit)
             | (Type::String, Type::String) => (),
             (Type::Variable(n), Type::Variable(m)) if n == m => (),
-            (Type::Variable(n), l) | (l, Type::Variable(n)) => {
-                map.insert(n, l);
-                for (tl, tr) in consts.iter_mut() {
-                    tl.substitute_vars(&map);
-                    tr.substitute_vars(&map);
-                }
-            }
+            (Type::Variable(n), l) | (l, Type::Variable(n)) => { map.insert(n, l); },
             (Type::Function(from1, to1), Type::Function(from2, to2)) => {
                 consts.push((*from1, *from2));
                 consts.push((*to1, *to2));
@@ -199,11 +193,13 @@ pub fn unify(consts: &mut Vec<(Type, Type)>) -> Result<HashMap<u16, Type>, Error
                     consts.push((x, y));
                 }
             }
-            (Type::Sum(n, s), Type::Sum(m, t)) => {
+            (Type::Sum(n, v), Type::Sum(m, u)) => {
                 if n == m {
-                    consts.push((*s, *t))
+                    for (x, y) in v.into_iter().zip(u.into_iter()) {
+                        consts.push((x, y));
+                    }                
                 } else {
-                    return Err(Error::TypeMismatch(Type::Sum(n, s), Type::Sum(m, t)));
+                    return Err(Error::TypeMismatch(Type::Sum(n, v), Type::Sum(m, u)));
                 }
             }
             // generics are always instantiated to variables before unification
