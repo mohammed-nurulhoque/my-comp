@@ -1,5 +1,8 @@
-use std::cmp::max;
-use std::collections::HashMap;
+use std::{
+    cmp::max,
+    collections::HashMap,
+    fmt,
+};
 
 #[derive(Debug)]
 pub enum ProtoType {
@@ -11,7 +14,7 @@ pub enum ProtoType {
     Generic(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Type {
     Unit,
     Int, Bool, String,
@@ -27,6 +30,39 @@ pub enum Type {
     Sum(u16, Vec<Type>),
     Generic(u16),
     Variable(u16),    // for type-checking
+}
+
+impl fmt::Debug for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> fmt::Result {
+        match *self {
+            Type::Unit => write!(f, "()"),
+            Type::Int => write!(f, "int"),
+            Type::Bool => write!(f, "bool"),
+            Type::String => write!(f, "string"),
+            Type::Constructor { target, position }=> write!(f, "~{}::{}", target, position),
+            Type::Function(ref from, ref to) => {
+                write!(f, "(")?;
+                from.as_ref().fmt(f)?;
+                write!(f, ") -> ")?;
+                to.as_ref().fmt(f)
+            }
+            Type::Tuple(ref v) => {
+                write!(f, "(")?;
+                for t in v {
+                    t.fmt(f)?;
+                    write!(f, ", ")?;
+                }
+                write!(f, ")")
+            }
+            Type::Sum(n, ref t) => {
+                write!(f, "~{}(", n)?;
+                t.fmt(f)?;
+                write!(f, ")")
+            },
+            Type::Generic(n) => write!(f, "{}", ('a' as u16 + n) as u8 as char),
+            Type::Variable(n) => write!(f, "{}", n),
+        }
+    }
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -116,7 +152,7 @@ impl Type {
     /// instantiated type and next free variable
     pub fn instantiate(&self, var: u16) -> (Type, u16) {
         match *self {
-            Type::Unit | Type::Int | Type::Bool | Type::String | Type::Constructor {..} => (self.clone(), var),
+            Type::Unit | Type::Int | Type::Bool | Type::String | Type::Constructor {..} | Type::Variable(_) => (self.clone(), var),
             Type::Function(ref from, ref to) => {
                 let (from, next) = from.instantiate(var);
                 let (to, nnext) = to.instantiate(var);
@@ -136,7 +172,6 @@ impl Type {
                 let next = next.into_iter().fold(var, |acc, elem| max(acc, elem));
                 (Type::Tuple(v), next)
             }
-            Type::Variable(_) => panic!("Variable not expected in instantiate"),
         }
     }
 
