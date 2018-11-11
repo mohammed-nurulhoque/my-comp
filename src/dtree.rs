@@ -52,20 +52,20 @@ mod test {
                 (
                     0,
                     vec![
-                        (ValPath::Local(vec![0]), ConstraintValue::Finite(0, 2)),
-                        (ValPath::Local(vec![1]), ConstraintValue::Finite(1, 2)),
+                        (ValPath::Local(vec![0]), ConstraintValue::Finite(1, 2)),
+                        (ValPath::Local(vec![1]), ConstraintValue::Finite(2, 2)),
                     ],
                 ),
                 (
                     1,
                     vec![
-                        (ValPath::Local(vec![0]), ConstraintValue::Finite(1, 2)),
-                        (ValPath::Local(vec![1]), ConstraintValue::Finite(0, 2)),
+                        (ValPath::Local(vec![0]), ConstraintValue::Finite(2, 2)),
+                        (ValPath::Local(vec![1]), ConstraintValue::Finite(1, 2)),
                     ],
                 ),
                 (
                     2,
-                    vec![(ValPath::Local(vec![0]), ConstraintValue::Finite(0, 2))],
+                    vec![(ValPath::Local(vec![0]), ConstraintValue::Finite(1, 2))],
                 ),
                 (3, vec![]),
             ],
@@ -80,18 +80,18 @@ mod test {
                 (
                     0,
                     vec![
-                        (ValPath::Local(vec![0, 0]), ConstraintValue::Finite(1, 3)),
+                        (ValPath::Local(vec![0, 0]), ConstraintValue::Finite(2, 3)),
                         (ValPath::Local(vec![0, 1]), ConstraintValue::Int(13)),
                     ],
                 ),
                 (1, vec![(ValPath::Local(vec![1]), ConstraintValue::Int(5))]),
                 (
                     2,
-                    vec![(ValPath::Local(vec![0, 0]), ConstraintValue::Finite(0, 3))],
+                    vec![(ValPath::Local(vec![0, 0]), ConstraintValue::Finite(1, 3))],
                 ),
                 (
                     3,
-                    vec![(ValPath::Local(vec![0, 0]), ConstraintValue::Finite(2, 3))],
+                    vec![(ValPath::Local(vec![0, 0]), ConstraintValue::Finite(3, 3))],
                 ),
                 (4, vec![]),
             ],
@@ -158,7 +158,7 @@ impl DTree {
         for (value, consted) in map.iter().rev() {
             match *consted {
                 Finite(m, n) => {
-                    let mut branches: Vec<_> = (0..n)
+                    let mut branches: Vec<_> = (1..=n)
                         .map(|i| {
                             if i == m {
                                 DTree::Empty
@@ -167,7 +167,7 @@ impl DTree {
                             }
                         })
                         .collect();
-                    branches[m as usize] = tail;
+                    branches[m as usize - 1] = tail;
                     tail = DTree::Finite {
                         value: value.clone(),
                         branches,
@@ -197,7 +197,7 @@ impl DTree {
             Finite { ref value, ref mut branches } if map.contains_key(value) => {
                 if let ConstraintValue::Finite(n, _) = map.remove(value).unwrap() {
                     // !!!
-                    branches[n as usize].add_pattern(map, exit)
+                    branches[n as usize - 1].add_pattern(map, exit)
                 } else {
                     panic!("infinite & finite contradiction")
                 }
