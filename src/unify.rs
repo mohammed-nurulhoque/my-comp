@@ -177,6 +177,7 @@ pub fn unify(consts: &mut Vec<(Type, Type)>) -> Result<HashMap<u16, Type>, Error
         let (mut tl, mut tr) = consts.pop().unwrap();
         tl.substitute_vars(&map); 
         tr.substitute_vars(&map);
+        if tl == tr { continue; }
         match  (tl, tr) {
             (Type::Int, Type::Int)
             | (Type::Bool, Type::Bool)
