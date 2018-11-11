@@ -6,6 +6,6 @@ pub mod error;
 pub mod types;
 pub mod type_check;
 pub mod imper_ast;
-pub mod unify;
+mod unify;
 mod dtree;
 mod namescope;

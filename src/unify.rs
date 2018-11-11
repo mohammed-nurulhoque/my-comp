@@ -183,7 +183,9 @@ pub fn unify(consts: &mut Vec<(Type, Type)>) -> Result<HashMap<u16, Type>, Error
             | (Type::Unit, Type::Unit)
             | (Type::String, Type::String) => (),
             (Type::Variable(n), Type::Variable(m)) if n == m => (),
-            (Type::Variable(n), l) | (l, Type::Variable(n)) => { map.insert(n, l); },
+            (Type::Variable(n), l) | (l, Type::Variable(n)) => { 
+                map.insert(n, l); 
+            }
             (Type::Function(from1, to1), Type::Function(from2, to2)) => {
                 consts.push((*from1, *from2));
                 consts.push((*to1, *to2));

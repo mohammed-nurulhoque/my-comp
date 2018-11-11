@@ -107,7 +107,7 @@ impl NameScope {
         self.head.as_mut().unwrap().local.extend(map)
     }
 
-    pub fn exists(&self, key: &str) -> bool {
+    pub fn _exists(&self, key: &str) -> bool {
         for (ns, _) in self.iter() {
             if ns.get(key).is_some() {
                 return true
@@ -118,7 +118,7 @@ impl NameScope {
 
     /// Get a name from a namescope, doing all captures as necessary
     /// # FUTURE
-    /// after nll conditional control flow remove unsafe
+    /// after nll conditional control flow, remove unsafe
     pub fn get(&mut self, key: &str) -> Option<&(ValPath, Type)> {
         if let Some(val) = self.head.as_mut().unwrap().local.get(key) {
             return unsafe {
