@@ -13,6 +13,7 @@ use crate::{
 };
 
 /// represents a compilation module (a single file)
+#[derive(Debug)]
 pub struct Module {
     /// all closures including top-level functions
     pub closures: Vec<(Closure)>,
@@ -56,6 +57,7 @@ pub enum ValPath {
 }
 
 /// Representation of a sum type
+#[derive(Debug)]
 pub struct TypeDecl {
     pub name: String,
     /// number of types on which this is generic
@@ -64,6 +66,7 @@ pub struct TypeDecl {
 }
 
 /// Represents both static (top-level functions) and dynamic closures
+#[derive(Debug)]
 pub struct Closure {
     /// values captured from parent
     pub captures: Vec<(ValPath, Type)>,
@@ -88,6 +91,7 @@ pub enum ConstraintValue {
 }
 
 /// Representation of an expression
+#[derive(Debug)]
 pub enum Expr {
     Literal(Literal),
     /// named value
