@@ -22,9 +22,8 @@ fn square = {
     x => x * x
 }
 
-/*
- * fn square x = x * x;
- */
+
+fn square x = x * x;
 
 rec fn foo = {
     (nil ()) => 0,
@@ -32,6 +31,11 @@ rec fn foo = {
 } and bar = {
     (nil ()) => 0,
     (cons (x, L)) => x - foo L,
+}
+
+rec fn qsort {
+    [] => [],
+    [x, ..L] => append (qsort (filter (< x) L)) (x::qsort (filter (> x) L)),
 }
 
 fn foobar = {
@@ -52,3 +56,32 @@ x = inorder (leaf ());
 x = (true, false);
 x = 1 + 2 * 2 - 1 + -3;
 x = "a\n\"bcdefg";
+
+rec qsort = fn {
+    [] => [],
+    [x, ..L] => append (qsort (filter (< x) L)) (x::qsort (filter (> x) L)),
+}
+
+rec (f, g) = (
+    fn { 
+        [] => [], 
+        [x, ..L] => x:: g L
+    }, fn {
+        [] => [], 
+        [x, ..L] => y:: f (rev L)
+    }
+);
+
+rec qsort = fn {
+    [] => [],
+    [x, ..L] => {
+        l = qsort (filter (< x) L);
+        r = qsort (filter (> x) L);
+        [..l, x, ..r]
+    },
+}
+
+rec qsort = fn {
+    [] => [],
+    [x, ..L] => [..[qsort (filter (< x) L)], x, ..qsort (filter (> x) L)],
+}

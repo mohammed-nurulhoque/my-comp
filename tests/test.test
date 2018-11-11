@@ -8,9 +8,42 @@ type List t =
     | cons (t, List t)
     ;
 
+rec fn map = {
+    f (nil ()) => nil (),
+    f (cons (x, L)) => cons(f x, map f L),
+}
+
+
+squares = map fn {x => x * x} (cons (0, cons(1, cons(2, nil ()))));
+
+rec fn range = {
+    i j => if i = j then nil () else cons(i, range (i+1) j) end,
+}
+
+rec fn filter = {
+    f (nil ()) => nil (),
+    f (cons (x, L)) => if f x then cons (x, filter f L) else filter f L end,
+}
+
+fn odds = {
+    i => filter fn {x => x % 2 = 1} (range 0 i),
+}
+
+odds = odds 10;
+
+rec fn reduce = {
+    f b (nil ()) => b,
+    f b (cons (x, L)) => f x (reduce f b L),
+}
+
 rec fn append = {
     (nil ()) right => right,
-    (cons (x, left)) right => cons(x, append (left, right)),
+    (cons (x, left)) right => cons(x, append (left, right))
+}
+
+rec fn qsort = {
+    (nil ()) => nil (),
+    cons(x, L) => append (filter fn {y => y < x} L) (cons (x, filter fn {y => y > x} L)),
 }
 
 rec fn inorder = {
