@@ -101,15 +101,7 @@ SimpleType: ProtoType = {
     "(" <Comma2<Type>> ")" => ProtoType::Tuple(<>),
 };
 
-pub Expr: Expr = {
-    "if" <cond:Expr> "then" <a:Expr> "else" <b:Expr> "end" => {
-        Expr::Conditional(Box::new(cond), Box::new(a), Box::new(b))
-    },
-    "fn" "{" <v:Comma<Arm>> "}" => Expr::Closure(v),
-    Expr0,
-};
-
-Expr0 = Class<Op0,Expr1>;       // and or
+pub Expr = Class<Op0,Expr1>;       // and or
 Expr1 = Class<Op1,Expr2>;       // compare
 Expr2 = Class<Op2,Expr3>;       // eq !=
 Expr3 = Class<Op3,Expr4>;       // factor
@@ -127,6 +119,10 @@ Term: Expr  = {
 };
 
 Base: Expr = {
+    "if" <cond:Expr> "then" <a:Expr> "else" <b:Expr> "end" => {
+        Expr::Conditional(Box::new(cond), Box::new(a), Box::new(b))
+    },
+    "fn" "{" <v:Comma<Arm>> "}" => Expr::Closure(v),
     <Literal> => Expr::Literal(<>),
     <bound:ID> => Expr::Bound(bound),
     "(" <Comma2<Expr>> ")" => Expr::Tuple(<>),
