@@ -8,6 +8,7 @@ The language is a simple functional language with the following basic features
 - pattern matching
 - currying
 - capturing enironment (closures)
+
 The following things are missing
 - mutual recursive types and functions
 - floating point data type
