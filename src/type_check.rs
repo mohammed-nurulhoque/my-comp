@@ -278,7 +278,6 @@ fn binding_transform<'a, 'b>(
         e
     };
     let mut type_consts = args.type_consts.drain(0..).collect();
-    let s = format!("{:?}", type_consts);
     let mut map = unify::unify(&mut type_consts)?;
     let mut local = args.namescope.pop_layer();
     for (_, (_, t)) in local.iter_mut() {
@@ -348,7 +347,6 @@ fn fn_transform<'a, 'b>(
     debug_assert!(len > 0);
     args.type_consts
         .push((Type::Variable(var), mk_curried_type(next, len + 1)));
-    let s = format!("{:?}", args.type_consts);
     let mut nnext = next + len + 1;
     let mut dtree = DTree::new();
     let mut branches = Vec::new();
@@ -370,12 +368,10 @@ fn fn_transform<'a, 'b>(
                 ValPath::Local,
                 &mut val_consts,
             );
-            let s = format!("{:?}", args.type_consts);
             path.pop();
         }
         dtree.add_pattern(val_consts, i as u16);
         let (e, tmp) = e.transform(next + len, nnext, args);
-        let s = format!("{:?}", args.type_consts);
         branches.push(e);
         nnext = tmp;
         args.namescope.drain_local();
@@ -520,7 +516,7 @@ impl Expr {
             Expr::Bound(s) => match args.namescope.get(&s) {
                 Some(ni) => {
                     let (path, t) = &*ni;
-                    let (mut t, mut next) = if let Type::Constructor { target, position } = t {
+                    let (t, next) = if let Type::Constructor { target, position } = t {
                         let ttype = &args.type_decls[*target as usize];
                         let (from, n1) = ttype.variants[*position as usize - 1].1.instantiate(next);
                         let (to, n2) = (
