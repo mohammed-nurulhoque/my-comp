@@ -1,15 +1,14 @@
 type List t =
     | nil ()
     | cons (t, List t)
-    ;
 
 rec fn reduce = {
     f b (nil ()) => b,
     f b (cons (x, L)) => f x (reduce f b L),
 }
 
-sum = reduce fn {x y => x + y} 0 L;
-prod = reduce fn {x y => x * y} 1 L;
+let sum = reduce {x y => x + y} 0 L
+let prod = reduce {x y => x * y} 1 L
 
 rec fn map = {
     f (nil ()) => nil (),
@@ -26,7 +25,17 @@ rec fn filter = {
 }
 
 fn odds = {
-    i => filter fn {x => x % 2 = 1} (range 0 i),
+    i => filter {x => x % 2 = 1} (range 0 i),
 }
 
-odds = odds 10;
+let odds = odds 10
+
+rec fn append = {
+    (nil (), right) => right,
+    (cons (x, left), right) => cons (x, append (left, right))
+}
+
+rec fn qsort = {
+    (nil ()) => nil (),
+    (cons (x, L)) => append ((filter {y => y < x} L), (cons (x, filter {y => y > x} L))),
+}

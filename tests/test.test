@@ -1,12 +1,10 @@
 type Tree t =
     | leaf ()
     | node (Tree t, t, Tree t)
-    ;
 
 type List t =
     | nil ()
     | cons (t, List t)
-    ;
 
 rec fn map = {
     f (nil ()) => nil (),
@@ -14,7 +12,7 @@ rec fn map = {
 }
 
 
-squares = map fn {x => x * x} (cons (0, cons(1, cons(2, nil ()))));
+let squares = map {x => x * x} (cons (0, cons(1, cons(2, nil ()))))
 
 rec fn range = {
     i j => if i = j then nil () else cons(i, range (i+1) j) end,
@@ -26,10 +24,10 @@ rec fn filter = {
 }
 
 fn odds = {
-    i => filter fn {x => x % 2 = 1} (range 0 i),
+    i => filter {x => x % 2 = 1} (range 0 i),
 }
 
-odds = odds 10;
+let odds = odds 10
 
 rec fn reduce = {
     f b (nil ()) => b,
@@ -43,7 +41,7 @@ rec fn append = {
 
 rec fn qsort = {
     (nil ()) => nil (),
-    cons(x, L) => append (filter fn {y => y < x} L) (cons (x, filter fn {y => y > x} L)),
+    cons(x, L) => append (filter {y => y < x} L) (cons (x, filter {y => y > x} L)),
 }
 
 rec fn inorder = {
@@ -55,10 +53,10 @@ fn square = {
     x => x * x
 }
 
-l = cons (2, nil ());
-r = cons (0, nil ());
-(cons (2, cons (0, nil()))) = append l r;
-x = inorder (leaf ());
-x = (true, false);
-x = 1 + 2 * 2 - 1 + -3;
-x = "a\n\"bcdefg";
+let l = cons (2, nil ())
+let r = cons (0, nil ())
+let (cons (2, cons (0, nil()))) = append l r
+let x = inorder (leaf ())
+let x = (true, false)
+let x = 1 + 2 * 2 - 1 + -3
+let x = "a\n\"bcdefg"
