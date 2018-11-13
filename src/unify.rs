@@ -13,59 +13,6 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_simple() {
-        let mut consts = vec![(Variable(1), Int), (Variable(0), Variable(1))];
-        let map = unify(&mut consts).unwrap();
-        assert_eq!(map[&0], Variable(1));
-        assert_eq!(map[&1], Int);
-
-        let mut t = Function(Box::new(Variable(0)), Box::new(Variable(1)));
-        t.substitute_vars(&map);
-        assert_eq!(t, Function(Box::new(Int), Box::new(Int)));
-    }
-
-    #[test]
-    fn test_unify_simple() {
-        let mut consts = vec![
-            (
-                Variable(0),
-                Function(Box::new(Variable(1)), Box::new(Variable(6))),
-            ),
-            (
-                Variable(4),
-                Function(Box::new(Variable(1)), Box::new(Variable(6))),
-            ),
-            (
-                Variable(2),
-                Function(Box::new(Variable(3)), Box::new(Variable(4))),
-            ),
-            (
-                Variable(2),
-                Function(
-                    Box::new(Int),
-                    Box::new(Function(Box::new(Int), Box::new(Int))),
-                ),
-            ),
-            (Variable(3), Int),
-        ];
-        let map = unify(&mut consts);
-        assert!(map.is_ok());
-        let map = map.unwrap();
-        assert_eq!(map[&3], Int);
-        assert_eq!(
-            map[&2],
-            Function(
-                Box::new(Int),
-                Box::new(Function(Box::new(Int), Box::new(Int))),
-            )
-        );
-        assert_eq!(map[&4], Function(Box::new(Int), Box::new(Int)));
-        assert_eq!(map[&1], Int);
-        assert_eq!(map[&6], Int);
-        assert_eq!(map[&0], Function(Box::new(Int), Box::new(Int)));
-    }
-
-    #[test]
     fn test_unify_fold() {
         // see consts.txt for derivation
         let mut consts = vec![
