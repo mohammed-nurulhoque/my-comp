@@ -120,7 +120,7 @@ pub enum PatternMatchErr {
 
 /// A decision tree for pattern matching
 #[derive(Clone, Debug)]
-pub enum DTree {
+pub enum DTree<'input> {
     /// existance in final tree implies inexhaustiveness
     Empty,
     /// nth pattern satisfied
@@ -130,29 +130,29 @@ pub enum DTree {
         /// value to test
         value: ValPath,
         /// branch for each possibility in the finite set
-        branches: Vec<DTree>,
+        branches: Vec<DTree<'input>>,
     },
     /// integer or string
     Infinite {
         /// value to test
         value: ValPath,
         /// branch for each constrained value
-        branches: HashMap<ConstraintValue, DTree>,
+        branches: HashMap<ConstraintValue<'input>, DTree<'input>>,
         /// default path if no value in map matched
-        default: Box<DTree>,
+        default: Box<DTree<'input>>,
     },
 }
 
-impl DTree {
+impl<'input> DTree<'input> {
     pub fn new() -> Self {
         DTree::Empty
     }
 
     /// create a tree the matches the constraints in map exiting with tail, else exits with default
     fn make_tree(
-        map: &BTreeMap<ValPath, ConstraintValue>,
-        mut tail: DTree,
-        default: &DTree,
+        map: &BTreeMap<ValPath, ConstraintValue<'input>>,
+        mut tail: DTree<'input>,
+        default: &DTree<'input>,
     ) -> Self {
         use self::ConstraintValue::*;
         for (value, consted) in map.iter().rev() {
@@ -190,7 +190,7 @@ impl DTree {
     /// modify the tree to match the exit pattern when the constraints in map are met
     /// ### REQUIRES
     /// exit has higher precedence that patterns in self
-    pub fn add_pattern(&mut self, mut map: BTreeMap<ValPath, ConstraintValue>, exit: u16) {
+    pub fn add_pattern(&mut self, mut map: BTreeMap<ValPath, ConstraintValue<'input>>, exit: u16) {
         use self::DTree::*;
         match *self {
             Empty | Exit(_) => *self = Self::make_tree(&map, Exit(exit), self),

@@ -14,17 +14,17 @@ use crate::{
 
 /// represents a compilation module (a single file)
 #[derive(Debug)]
-pub struct Module {
+pub struct Module<'input> {
     /// all closures including top-level functions
-    pub closures: Vec<(Closure)>,
+    pub closures: Vec<(Closure<'input>)>,
     /// vector of global values, each declaration is a single value
     /// e.g. (x, y) = (1, 2) is a single value. The BTreeMap has any
     /// literal constraints on global values e.g.
     /// (1, 2) = f 5;
-    pub globals: Vec<(Expr, BTreeMap<ValPath, ConstraintValue>, Type)>,
+    pub globals: Vec<(Expr<'input>, BTreeMap<ValPath, ConstraintValue<'input>>, Type)>,
     /// path of each global name including top-level functions
-    pub globals_names: HashMap<String, ValPath>,
-    pub type_decls: Vec<TypeDecl>,
+    pub globals_names: HashMap<&'input str, ValPath>,
+    pub type_decls: Vec<TypeDecl<'input>>,
 }
 
 /// The path of a value. Together with the type, it can give the actual position
@@ -58,28 +58,28 @@ pub enum ValPath {
 
 /// Representation of a sum type
 #[derive(Debug)]
-pub struct TypeDecl {
-    pub name: String,
+pub struct TypeDecl<'input> {
+    pub name: &'input str,
     /// number of types on which this is generic
     pub num_generics: u16,
-    pub variants: Vec<(String,Type)>,
+    pub variants: Vec<(&'input str,Type)>,
 }
 
 /// Represents both static (top-level functions) and dynamic closures
 #[derive(Debug)]
-pub struct Closure {
+pub struct Closure<'input> {
     /// values captured from parent
     pub captures: Vec<(ValPath, Type)>,
     pub args: Vec<Type>,
     pub return_type: Type,
     /// decision tree of args pattern matching
-    pub dtree: DTree,
-    pub branches: Vec<Expr>,
+    pub dtree: DTree<'input>,
+    pub branches: Vec<Expr<'input>>,
 }
 
 /// A pattern is a set of constraints on a value, which are categorized as follows
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
-pub enum ConstraintValue {
+pub enum ConstraintValue<'input> {
     /// nth option out of x finitely many option, includes Booleans and union tags
     /// indexing starting from 1 upto x.
     Finite(u16, u16),
@@ -87,27 +87,27 @@ pub enum ConstraintValue {
     /// is practically inifinite
     Int(isize),
     /// string constraint, we allow strings in pattern matching
-    Str(String),
+    Str(&'input str),
 }
 
 /// Representation of an expression
 #[derive(Debug)]
-pub enum Expr {
-    Literal(Literal),
+pub enum Expr<'input> {
+    Literal(Literal<'input>),
     /// named value
     Bound(ValPath),
-    Tuple(Vec<Expr>),
+    Tuple(Vec<Expr<'input>>),
 
-    BinOp(Box<Expr>, BinOpcode, Box<Expr>),
-    UnOp(UnOpcode, Box<Expr>),
+    BinOp(Box<Expr<'input>>, BinOpcode, Box<Expr<'input>>),
+    UnOp(UnOpcode, Box<Expr<'input>>),
 
     /// closure which is an index into Module.anon_funcs
     Closure(u16),
     /// Apply e1 on e2
-    Application(Box<Expr>, Box<Expr>),
+    Application(Box<Expr<'input>>, Box<Expr<'input>>),
 
     /// if e1 then e2 else e3
-    Conditional(Box<Expr>, Box<Expr>, Box<Expr>),
+    Conditional(Box<Expr<'input>>, Box<Expr<'input>>, Box<Expr<'input>>),
 
     Error,
 }

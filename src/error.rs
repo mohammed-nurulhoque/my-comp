@@ -7,20 +7,20 @@ use crate::types::Type;
 
 /// All errors from AST -> imperAST phase, not used yet!
 #[derive(Debug)]
-pub enum Error {
+pub enum Error<'input> {
     IOErr(ioErr),
     ParseErr,
     TypeMismatch(Type, Type),
     ConstructorUnification,
-    NameNotFound(String),
-    MultBindPattern(String),
-    ConstructorNotFound(String),
-    NonConstAppPattern(String),
-    TypeNotDefined(String),
+    NameNotFound(&'input str),
+    MultBindPattern(&'input str),
+    ConstructorNotFound(&'input str),
+    NonConstAppPattern(&'input str),
+    TypeNotDefined(&'input str),
     VariablePatsNum,
 }
 
-impl From<ioErr> for Error {
+impl<'input> From<ioErr> for Error<'input> {
     fn from(e: ioErr) -> Self {
         Error::IOErr(e)
     }

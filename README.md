@@ -16,4 +16,4 @@ The following things are missing
 ## Roadmap
 - add error handling
 - make VM
-- zero-copying source string
+- // zero-copying source string -- done

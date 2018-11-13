@@ -117,7 +117,7 @@ impl Type {
 }
 
 /// Hindly-Milner unification
-pub fn unify(consts: &mut Vec<(Type, Type)>) -> Result<HashMap<u16, Type>, Error> {
+pub fn unify(consts: &mut Vec<(Type, Type)>) -> Result<HashMap<u16, Type>, Error<'static>> {
     let mut map = HashMap::new();
     // FIXME: don't return immediately at error, keep unifying
     while consts.len() > 0 {

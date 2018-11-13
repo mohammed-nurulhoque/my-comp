@@ -5,52 +5,52 @@ use crate::types::{ProtoType, Literal, BinOpcode, UnOpcode};
 /// Binds a name to a type definition or a expression to a pattern,
 /// every top level declaration is of this type
 #[derive(Debug)]
-pub enum Binding {
+pub enum Binding<'input> {
     Type {
         /// name to bind the type to
-        name: String, 
+        name: &'input str, 
         /// generic variables
-        vars: Vec<String>,
+        vars: Vec<&'input str>,
         /// variants' names and arguments' types
-        variants: Vec<(String, ProtoType)> },
+        variants: Vec<(&'input str, ProtoType<'input>)> },
     /// bool for is recursive?
-    Value(Pattern, Expr, bool),
+    Value(Pattern<'input>, Expr<'input>, bool),
 }
 
 /// A pattern or LHS of a binding to match
 #[derive(Debug)]
-pub enum Pattern {
+pub enum Pattern<'input> {
     /// Wild card matches everything
     Wild,
     /// matches a concrete value, e.g. a number or a string
-    Literal(Literal),
+    Literal(Literal<'input>),
     /// Binds any matched expression to a name
-    Bind(String),
+    Bind(&'input str),
     /// matches a tuple (recursively)
-    Tuple(Vec<Pattern>),
+    Tuple(Vec<Pattern<'input>>),
     /// matches a variant of a sum type and its argument with leading path
-    SumVar(String, Box<Pattern>),
+    SumVar(&'input str, Box<Pattern<'input>>),
 }
 
 /// An expression or RHS that evaluates to a value,
 #[derive(Debug)]
-pub enum Expr {
+pub enum Expr<'input> {
     /// a value literal e.g int, string
-    Literal(Literal),
+    Literal(Literal<'input>),
     /// value of a name that was previously bound with leading path
-    Bound(String),
+    Bound(&'input str),
     /// a tuple of values
-    Tuple(Vec<Expr>),
+    Tuple(Vec<Expr<'input>>),
 
     /// the value of applying a binary operation on two Exprs
-    BinOp(Box<Expr>, BinOpcode, Box<Expr>),
+    BinOp(Box<Expr<'input>>, BinOpcode, Box<Expr<'input>>),
     /// the value of applying a unary operation on an Expr
-    UnOp(UnOpcode, Box<Expr>),
+    UnOp(UnOpcode, Box<Expr<'input>>),
 
     /// A closure is a sequence of patterns and corresponsing expressions
-    Closure(Vec<(Vec<Pattern>, Expr)>),
+    Closure(Vec<(Vec<Pattern<'input>>, Expr<'input>)>),
     /// Apply an expression on an expression
-    Application(Box<Expr>, Box<Expr>),
+    Application(Box<Expr<'input>>, Box<Expr<'input>>),
     /// if e1 then e2 else e3
-    Conditional(Box<Expr>, Box<Expr>, Box<Expr>),
+    Conditional(Box<Expr<'input>>, Box<Expr<'input>>, Box<Expr<'input>>),
 }

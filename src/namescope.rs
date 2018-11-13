@@ -17,22 +17,22 @@ mod tests {
     fn test() {
         let ns0 = NameScope { head: Some(Box::new(ScopeList {
             local: HashMap::from_iter(vec![
-                ("foxbar".to_string(), (ValPath::Constructor, Type::Bool)),
-                ("cnnbar".to_string(), (ValPath::Local(vec![0]), Type::Bool)),
+                ("foxbar", (ValPath::Constructor, Type::Bool)),
+                ("cnnbar", (ValPath::Local(vec![0]), Type::Bool)),
             ]),
             captures_sz: 0,
             parent: NameScope { head: None },
         }))};
         let ns1 = NameScope { head: Some(Box::new(ScopeList {
             local: HashMap::from_iter(vec![
-                ("bar".to_string(), (ValPath::Local(vec![0]), Type::Bool)),
-                ("foobar".to_string(), (ValPath::CaptureLocal(0, vec![0]), Type::Bool)),
+                ("bar", (ValPath::Local(vec![0]), Type::Bool)),
+                ("foobar", (ValPath::CaptureLocal(0, vec![0]), Type::Bool)),
             ]),
             captures_sz: 1,
             parent: ns0,
         }))};
         let mut ns = NameScope { head: Some(Box::new(ScopeList {
-            local: HashMap::from_iter(vec![("foo".to_string(), (ValPath::Local(vec![0]), Type::Bool))]),
+            local: HashMap::from_iter(vec![("foo", (ValPath::Local(vec![0]), Type::Bool))]),
             captures_sz: 0,
             parent: ns1,
         }))};
@@ -44,25 +44,25 @@ mod tests {
     }
 }
 
-pub struct NameScope {
-    head: Option<Box<ScopeList>>,
+pub struct NameScope<'input> {
+    head: Option<Box<ScopeList<'input>>>,
 }
 
-struct ScopeList {
-    pub local: HashMap<String, (ValPath, Type)>,
+struct ScopeList<'input> {
+    pub local: HashMap<&'input str, (ValPath, Type)>,
     captures_sz: u16,
-    parent: NameScope,
+    parent: NameScope<'input>,
 }
 
-struct IterMut<'a> {
-    next: Option<&'a mut ScopeList>,
+struct IterMut<'a, 'input> {
+    next: Option<&'a mut ScopeList<'input>>,
 }
 
-struct Iter<'a> {
-    next: Option<&'a ScopeList>,
+struct Iter<'a, 'input> {
+    next: Option<&'a ScopeList<'input>>,
 }
 
-impl NameScope {
+impl<'input> NameScope<'input> {
     pub fn new() -> Self {
         NameScope { head: Some(Box::new(ScopeList { 
             local: HashMap::new(), 
@@ -71,7 +71,7 @@ impl NameScope {
         }))}
     }
 
-    pub fn local(&mut self) -> &mut HashMap<String, (ValPath, Type)> {
+    pub fn local(&mut self) -> &mut HashMap<&'input str, (ValPath, Type)> {
         &mut self.head.as_mut().unwrap().local
     }
 
@@ -79,7 +79,7 @@ impl NameScope {
         Iter { next: self.head.as_ref().map(|node| &**node) }
     }
 
-    fn iter_mut(&mut self) -> IterMut {
+    fn iter_mut<'a>(&'a mut self) -> IterMut<'a, 'input> {
         IterMut { next: self.head.as_mut().map(|node| &mut **node) }
     }
 
@@ -92,7 +92,7 @@ impl NameScope {
         self.head = Some(node);
     }
 
-    pub fn pop_layer(&mut self) -> HashMap<String, (ValPath, Type)> {
+    pub fn pop_layer(&mut self) -> HashMap<&'input str, (ValPath, Type)> {
         self.head.take().map(|node| {
             *self = node.parent;
             node.local
@@ -103,7 +103,7 @@ impl NameScope {
         self.head.as_mut().unwrap().local.retain(|_, v| if let (ValPath::Local(_), _) = v { false } else { true })
     }
 
-    pub fn extend_local(&mut self, map: HashMap<String, (ValPath, Type)>) {
+    pub fn extend_local(&mut self, map: HashMap<&'input str, (ValPath, Type)>) {
         self.head.as_mut().unwrap().local.extend(map)
     }
 
@@ -119,7 +119,7 @@ impl NameScope {
     /// Get a name from a namescope, doing all captures as necessary
     /// # FUTURE
     /// after nll conditional control flow, remove unsafe
-    pub fn get(&mut self, key: &str) -> Option<&(ValPath, Type)> {
+    pub fn get(&mut self, key: &'input str) -> Option<&(ValPath, Type)> {
         if let Some(val) = self.head.as_mut().unwrap().local.get(key) {
             return unsafe {
                 Some(&*(val as *const _))
@@ -146,20 +146,20 @@ impl NameScope {
         let mut namescopes = self.iter_mut();
         for len in lengths {
             let (map, captures_sz) = namescopes.next().unwrap();
-            insert_captured(map, captures_sz, key.to_string(), &ValPath::CaptureCaptured(len, 0), t.clone());
+            insert_captured(map, captures_sz, key, &ValPath::CaptureCaptured(len, 0), t.clone());
         }
         let (map, captures_sz) = namescopes.next().unwrap();
-        insert_captured(map, captures_sz, key.to_string(), &path, t.clone());
+        insert_captured(map, captures_sz, key, &path, t.clone());
         self.get(key)
     }
 }
 
 
 /// inserts a captured value in self.local given its path in parent and update capture_sz
-fn insert_captured(
-    map: &mut HashMap<String, (ValPath, Type)>, 
+fn insert_captured<'input>(
+    map: &mut HashMap<&'input str, (ValPath, Type)>, 
     captures_sz: &mut u16,
-    key: String, path_up: &ValPath, t: Type
+    key: &'input str, path_up: &ValPath, t: Type
 ) -> Option<(ValPath, Type)> {
     let path_down = match path_up {
         &ValPath::Local(ref v) => ValPath::CaptureLocal(*captures_sz, v.clone()),
@@ -172,8 +172,8 @@ fn insert_captured(
     map.insert(key, (path_down, t))
 }
 
-impl<'a> Iterator for Iter<'a> {
-    type Item = (&'a HashMap<String, (ValPath, Type)>, u16);
+impl<'a, 'input> Iterator for Iter<'a, 'input> {
+    type Item = (&'a HashMap<&'input str, (ValPath, Type)>, u16);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next.take().map(|node| {
@@ -183,8 +183,8 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
-impl<'a> Iterator for IterMut<'a> {
-    type Item =  (&'a mut HashMap<String, (ValPath, Type)>, &'a mut u16);
+impl<'a, 'input> Iterator for IterMut<'a, 'input> {
+    type Item =  (&'a mut HashMap<&'input str, (ValPath, Type)>, &'a mut u16);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next.take().map(|node| {

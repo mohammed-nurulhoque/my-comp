@@ -5,13 +5,13 @@ use std::{
 };
 
 #[derive(Debug)]
-pub enum ProtoType {
+pub enum ProtoType<'input> {
     Unit,
     Int, Bool, String,
-    Function(Box<ProtoType>, Box<ProtoType>),
-    Tuple(Vec<ProtoType>),
-    Sum(String, Box<ProtoType>),
-    Generic(String),
+    Function(Box<ProtoType<'input>>, Box<ProtoType<'input>>),
+    Tuple(Vec<ProtoType<'input>>),
+    Sum(&'input str, Box<ProtoType<'input>>),
+    Generic(&'input str),
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -72,14 +72,14 @@ impl fmt::Debug for Type {
 }
 
 #[derive(PartialEq, Debug, Clone)]
-pub enum Literal {
+pub enum Literal<'input> {
     Unit,
     Int(isize),
     Bool(bool),
-    String(String),
+    String(&'input str),
 }
 
-impl Literal {
+impl<'input> Literal<'input> {
     pub fn get_type(&self) -> Type {
         match *self {
             Literal::Unit      => Type::Unit,
@@ -116,11 +116,11 @@ pub enum UnOpcode {
     Not,
 }
 
-impl ProtoType {
+impl<'input> ProtoType<'input> {
     pub fn to_type(
         self,
-        type_map: &HashMap<String, u16>, // map of type names -> index in types vector
-        generics_map: &HashMap<String, u16>,
+        type_map: &HashMap<&'input str, u16>, // map of type names -> index in types vector
+        generics_map: &HashMap<&'input str, u16>,
     ) -> Type {
         use self::ProtoType as P;
         use self::Type as T;

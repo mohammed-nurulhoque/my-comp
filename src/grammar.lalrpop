@@ -4,13 +4,13 @@ use crate::{
 };
 grammar;
 
-pub Program: Vec<Binding> = {
+pub Program: Vec<Binding<'input>> = {
     Statement*,
 };
 
-Statement: Binding = {
+Statement: Binding<'input> = {
     TypeDecl,
-    Binding,
+    ValBinding,
     FnBinding,
 }
 
@@ -34,25 +34,25 @@ Comma2<T>: Vec<T> = {
     }
 }
 
-TypeDecl: Binding = {
+TypeDecl: Binding<'input> = {
     "type" <name:ID> <vars:TypeVars> "=" <variants:SumVarDecl+> => Binding::Type {<>},
 };
 
-TypeVars: Vec<String> = {
+TypeVars: Vec<&'input str> = {
     "()" => vec![],
     ID => vec![<>],
     "(" <Comma<ID>> ")",
 }
 
-SumVarDecl: (String, ProtoType) = {
+SumVarDecl: (&'input str, ProtoType<'input>) = {
     "|" <ID> <Type>,
 };
 
-Binding: Binding = {
+ValBinding: Binding<'input> = {
     "let" <Pattern> "=" <Expr> => Binding::Value(<>, false),
 };
 
-FnBinding: Binding = {
+FnBinding: Binding<'input> = {
     "fn" <name:ID> "=" "{" <v:Comma<Arm>> "}" => Binding::Value(Pattern::Bind(name), Expr::Closure(v), false),
     "rec" "fn" <name:ID> "=" "{" <v:Comma<Arm>> "}" => Binding::Value(Pattern::Bind(name), Expr::Closure(v), true),
 };
@@ -61,7 +61,7 @@ Arm = {
     <Pattern+> "=>" <Expr>,
 };
 
-Pattern: Pattern = {
+Pattern: Pattern<'input> = {
     Literal => Pattern::Literal(<>),
     "_" => Pattern::Wild,
     ID => Pattern::Bind(<>),
@@ -69,28 +69,28 @@ Pattern: Pattern = {
     "(" <PatternH> ")",
 };
 
-PatternH: Pattern = {
+PatternH: Pattern<'input> = {
     <id:ID> <field:Pattern> =>  Pattern::SumVar(id, Box::new(field)),
     Pattern,
 };
 
-Class<Op,NextClass>: Expr = {
+Class<Op,NextClass>: Expr<'input> = {
     <l:Class<Op,NextClass>> <op:Op> <r:NextClass> => 
         Expr::BinOp(Box::new(l), op, Box::new(r)),
     NextClass,
 };
 
-UnaryClass<Op, NextClass>: Expr = {
+UnaryClass<Op, NextClass>: Expr<'input> = {
     <op:Op> <e:UnaryClass<Op,NextClass>> => Expr::UnOp(op, Box::new(e)),
     NextClass,
 };
 
-Type: ProtoType = {
+Type: ProtoType<'input> = {
     <SimpleType>,
     <from:SimpleType> "->" <to:Type> => ProtoType::Function(Box::new(from), Box::new(to)),
 };
 
-SimpleType: ProtoType = {
+SimpleType: ProtoType<'input> = {
     "()" => ProtoType::Unit,
     "int" => ProtoType::Int,
     "bool" => ProtoType::Bool,
@@ -108,7 +108,7 @@ Expr3 = Class<Op3,Expr4>;       // factor
 Expr4 = Class<Op4,Expr5>;       // term
 Expr5 = UnaryClass<Op5,Term>;   //unary
 
-Term: Expr  = {
+Term: Expr<'input>  = {
     <hd:Base> <v:Base*> => {
         let mut expr = hd;
         for e in v {
@@ -118,7 +118,7 @@ Term: Expr  = {
     },
 };
 
-Base: Expr = {
+Base: Expr<'input> = {
     "if" <cond:Expr> "then" <a:Expr> "else" <b:Expr> "end" => {
         Expr::Conditional(Box::new(cond), Box::new(a), Box::new(b))
     },
@@ -129,8 +129,8 @@ Base: Expr = {
     "(" <Expr> ")",
 };
 
-Literal: Literal = {
-    r#""(\\.|[^"\\])*""# => Literal::String(<>[1..(<>.len()-1)].to_string()),
+Literal: Literal<'input> = {
+    r#""(\\.|[^"\\])*""# => Literal::String(&<>[1..(<>.len()-1)]),
     r"-?[0-9]+" => Literal::Int(isize::from_str_radix(<>, 10).unwrap()),
     "true" => Literal::Bool(true),
     "false" => Literal::Bool(false),
@@ -170,6 +170,6 @@ Op5: UnOpcode = {
     "-" => UnOpcode::Minus,
 };
 
-ID: String = {
-    r"[a-zA-Z_'][a-zA-Z_'0-9]*" => <>.to_string(),
+ID: &'input str = {
+    r"[a-zA-Z_'][a-zA-Z_'0-9]*" => <>,
 }

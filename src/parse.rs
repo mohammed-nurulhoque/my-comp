@@ -4,20 +4,15 @@ use std::{
     fs::File,
 };
 use crate::{
-    grammar::ProgramParser,
-    ast::Binding,
     error::Error,
 };
 
-pub fn parse_file(parser: &ProgramParser, filename: &str) -> Result<Vec<Binding>, Error> {
+pub fn read_file(filename: &str) -> Result<String, Error<'static>> {
     let mut f = File::open(filename)?;
     let mut cont = String::new();
     f.read_to_string(&mut cont)?;
     let uncommented = uncomment(&cont);
-    match parser.parse(&uncommented) {
-        Ok(result) => Ok(result),
-        Err(_) => Err(Error::ParseErr),
-    }
+    Ok(uncommented)
 }
 
 pub fn uncomment(src: &str) -> String {

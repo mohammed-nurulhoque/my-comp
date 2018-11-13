@@ -38,37 +38,37 @@ mod test {
 
     #[test]
     fn test_get_type_decl() {
-        let vars = vec!["T".to_string()];
+        let vars = vec!["T"];
         let variants = vec![
-            ("Nil".to_string(), ProtoType::Unit),
+            ("Nil", ProtoType::Unit),
             (
-                "Node".to_string(),
+                "Node",
                 ProtoType::Tuple(vec![
                     ProtoType::Sum(
-                        "List".to_string(),
-                        Box::new(ProtoType::Generic("T".to_string())),
+                        "List",
+                        Box::new(ProtoType::Generic("T")),
                     ),
                     ProtoType::Sum(
-                        "List".to_string(),
+                        "List",
                         Box::new(ProtoType::Sum(
-                            "BTree".to_string(),
-                            Box::new(ProtoType::Generic("T".to_string())),
+                            "BTree",
+                            Box::new(ProtoType::Generic("T")),
                         )),
                     ),
                 ]),
             ),
         ];
-        let mut type_map = vec![("List".to_string(), 0)].into_iter().collect();
+        let mut type_map = vec![("List", 0)].into_iter().collect();
         let mut ns = NameScope::new();
-        let dec = get_type_decl("BTree".to_string(), vars, variants, &mut type_map, &mut ns);
+        let dec = get_type_decl("BTree", vars, variants, &mut type_map, &mut ns);
         assert_eq!(dec.name, "BTree");
         assert_eq!(dec.num_generics, 1);
         assert_eq!(
             dec.variants,
             vec![
-                ("Nil".to_string(), Type::Unit),
+                ("Nil", Type::Unit),
                 (
-                    "Node".to_string(),
+                    "Node",
                     Type::Tuple(vec![
                         Type::Sum(0, vec!(Type::Generic(0))),
                         Type::Sum(0, vec!(Type::Sum(1, vec!(Type::Generic(0)))))
@@ -104,17 +104,17 @@ mod test {
         use self::Pattern::*;
         let pat = Tuple(vec![
             SumVar(
-                "cons".to_string(),
-                Box::new(Tuple(vec![Bind("x".to_string()), Bind("L1".to_string())])),
+                "cons",
+                Box::new(Tuple(vec![Bind("x"), Bind("L1")])),
             ),
             SumVar(
-                "cons".to_string(),
-                Box::new(Tuple(vec![Bind("y".to_string()), Bind("L2".to_string())])),
+                "cons",
+                Box::new(Tuple(vec![Bind("y"), Bind("L2")])),
             ),
         ]);
         let mut ns = NameScope::new();
         ns.local().insert(
-            "cons".to_string(),
+            "cons",
             (
                 ValPath::Constructor,
                 Type::Constructor {
@@ -127,12 +127,12 @@ mod test {
         let mut type_consts = Vec::new();
         let mut val_consts = BTreeMap::new();
         let mut type_decls = vec![TypeDecl {
-            name: "List".to_string(),
+            name: "List",
             num_generics: 1,
             variants: vec![
-                ("nil".to_string(), Type::Unit),
+                ("nil", Type::Unit),
                 (
-                    "cons".to_string(),
+                    "cons",
                     Type::Tuple(vec![Type::Generic(0), Type::Sum(0, vec![Type::Generic(0)])]),
                 ),
             ],
@@ -230,12 +230,12 @@ pub fn ast2imper_ast(bindings: Vec<Binding>) -> Result<Module, Error> {
 type TypeConstraint = (Type, Type);
 
 /// wraps arguments for conciseness
-struct Args<'a> {
-    type_decls: &'a mut Vec<TypeDecl>,
-    closures: &'a mut Vec<Closure>,
-    namescope: &'a mut NameScope,
+struct Args<'a, 'input> {
+    type_decls: &'a mut Vec<TypeDecl<'input>>,
+    closures: &'a mut Vec<Closure<'input>>,
+    namescope: &'a mut NameScope<'input>,
     type_consts: &'a mut Vec<TypeConstraint>,
-    errors: &'a mut Vec<Error>,
+    errors: &'a mut Vec<Error<'input>>,
 }
 
 /// Transform a top-level binding
@@ -251,13 +251,13 @@ struct Args<'a> {
 /// # Future
 /// when non-top-level bindings are allowed, shouldn't generalize types here
 
-fn binding_transform<'a, 'b>(
+fn binding_transform<'a, 'b, 'input>(
     order: u16,
-    pat: Pattern,
-    expr: Expr,
+    pat: Pattern<'input>,
+    expr: Expr<'input>,
     is_rec: bool,
-    args: &mut Args<'a>,
-) -> Result<(iExpr, BTreeMap<ValPath, ConstraintValue>, Type), Error> {
+    args: &mut Args<'a, 'input>,
+) -> Result<(iExpr<'input>, BTreeMap<ValPath, ConstraintValue<'input>>, Type), Error<'input>> {
     let mut path = vec![order];
     let mut val_consts = BTreeMap::new();
     // remember how many closures was already there. Closures are added to global closures vector
@@ -298,20 +298,20 @@ fn binding_transform<'a, 'b>(
     Ok((expr, val_consts, t))
 }
 
-fn get_type_decl(
-    name: String,
-    vars: Vec<String>,
-    variants: Vec<(String, ProtoType)>,
-    type_map: &mut HashMap<String, u16>,
-    namescope: &mut NameScope,
-) -> TypeDecl {
-    let generics_map: HashMap<String, u16> = vars
+fn get_type_decl<'input>(
+    name: &'input str,
+    vars: Vec<&'input str>,
+    variants: Vec<(&'input str, ProtoType<'input>)>,
+    type_map: &mut HashMap<&'input str, u16>,
+    namescope: &mut NameScope<'input>,
+) -> TypeDecl<'input> {
+    let generics_map: HashMap<&'input str, u16> = vars
         .into_iter()
         .enumerate()
         .map(|(i, s)| (s, i as u16))
         .collect();
     let len = type_map.len() as u16;
-    type_map.insert(name.clone(), len);
+    type_map.insert(name, len);
     TypeDecl {
         name,
         num_generics: generics_map.len() as u16,
@@ -321,7 +321,7 @@ fn get_type_decl(
             .map(|(i, (s, t))| {
                 let t = t.to_type(type_map, &generics_map);
                 namescope.local().insert(
-                    s.clone(),
+                    s,
                     (
                         ValPath::Constructor,
                         Type::Constructor {
@@ -336,11 +336,11 @@ fn get_type_decl(
     }
 }
 
-fn fn_transform<'a, 'b>(
-    fn_branches: Vec<(Vec<Pattern>, Expr)>,
+fn fn_transform<'a, 'b, 'input>(
+    fn_branches: Vec<(Vec<Pattern<'input>>, Expr<'input>)>,
     var: u16,
     next: u16,
-    args: &mut Args<'a>,
+    args: &mut Args<'a, 'input>,
 ) -> (u16, u16) {
     // patterns per branch
     let len = fn_branches[0].0.len() as u16;
@@ -401,7 +401,7 @@ fn fn_transform<'a, 'b>(
     ((args.closures.len() - 1) as u16, nnext)
 }
 
-impl Pattern {
+impl<'input> Pattern<'input> {
     /// parse a pattern and fill local with the name bindings, and val_consts with
     /// value bindings.
     /// ### RETURNS
@@ -411,9 +411,9 @@ impl Pattern {
         var: u16,
         next: u16,
         path: &mut Vec<u16>,
-        args: &mut Args<'a>,
+        args: &mut Args<'a, 'input>,
         valpath_constructor: T,
-        val_consts: &mut BTreeMap<ValPath, ConstraintValue>,
+        val_consts: &mut BTreeMap<ValPath, ConstraintValue<'input>>,
     ) -> u16 {
         match self {
             Pattern::Wild => next,
@@ -501,9 +501,9 @@ impl Pattern {
     }
 }
 
-impl Expr {
-    fn transform<'a, 'b>(self, var: u16, next: u16, args: &mut Args<'a>) -> (iExpr, u16) {
-        let sequence = |e1: Expr, e2: Expr, var1, var2, next, args: &mut Args<'a>| {
+impl<'input> Expr<'input> {
+    fn transform<'a, 'b>(self, var: u16, next: u16, args: &mut Args<'a, 'input>) -> (iExpr<'input>, u16) {
+        let sequence = |e1: Expr<'input>, e2: Expr<'input>, var1, var2, next, args: &mut Args<'a, 'input>| {
             let (e1, next) = e1.transform(var1, next, args);
             let (e2, next) = e2.transform(var2, next, args);
             (e1, e2, next)
@@ -631,8 +631,8 @@ fn mk_curried_type(from: u16, count: u16) -> Type {
     t
 }
 
-impl Literal {
-    fn get_constraint(self) -> ConstraintValue {
+impl<'input> Literal<'input> {
+    fn get_constraint(self) -> ConstraintValue<'input> {
         match self {
             Literal::Unit => panic!("trying to get constraint from unit"),
             Literal::Int(n) => ConstraintValue::Int(n),
@@ -643,7 +643,7 @@ impl Literal {
     }
 }
 
-impl Closure {
+impl<'input> Closure<'input> {
     fn substitute_types(&mut self, map: &HashMap<u16, Type>) {
         for (_, t) in &mut self.captures {
             t.substitute_vars(&map);
