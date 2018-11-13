@@ -9,3 +9,4 @@ pub mod imper_ast;
 mod unify;
 mod dtree;
 mod namescope;
+mod parse;
