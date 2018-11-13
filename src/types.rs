@@ -41,16 +41,22 @@ impl fmt::Debug for Type {
             Type::String => write!(f, "string"),
             Type::Constructor { target, position }=> write!(f, "~{}::{}", target, position),
             Type::Function(ref from, ref to) => {
-                write!(f, "(")?;
-                from.as_ref().fmt(f)?;
-                write!(f, ") -> ")?;
+                if let Type::Function (..) = **from {
+                    write!(f, "(")?;
+                    from.as_ref().fmt(f)?;
+                    write!(f, ") -> ")?;
+                } else {
+                    from.as_ref().fmt(f)?;
+                    write!(f, " -> ")?;
+                }
                 to.as_ref().fmt(f)
             }
             Type::Tuple(ref v) => {
                 write!(f, "(")?;
-                for t in v {
-                    t.fmt(f)?;
+                v[0].fmt(f)?;
+                for t in v.iter().skip(1) {
                     write!(f, ", ")?;
+                    t.fmt(f)?;
                 }
                 write!(f, ")")
             }
