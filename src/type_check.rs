@@ -294,7 +294,9 @@ fn binding_transform<'a, 'b, 'input>(
     let mut t = Type::Variable(0);
     t.substitute_vars(&mut map);
     t.generalize_type();
-    println!("{:?}", t);
+    let mut pretty = String::new();
+    t.pretty_format(&mut pretty, args.type_decls);
+    println!("{}",pretty);
     Ok((expr, val_consts, t))
 }
 

@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     fmt,
 };
+use crate::imper_ast::TypeDecl;
 
 #[derive(Debug)]
 pub enum ProtoType<'input> {
@@ -27,47 +28,84 @@ pub enum Type {
     },
     Function(Box<Type>, Box<Type>),
     Tuple(Vec<Type>),
+    /// Sum type
+    // a vector is used instead of a box type, because sum is frequently on a tuple type,
+    // this optimizes the common case to 1 level of indirection instead of 2.
     Sum(u16, Vec<Type>),
     Generic(u16),
-    Variable(u16),    // for type-checking
+    Variable(u16),    // type variable only used for type-checking
+}
+
+impl Type {
+    pub fn pretty_format(&self, result: &mut String, map: &Vec<TypeDecl>){
+        let call_self = |t: &Self, dst: &mut String| t.pretty_format(dst, map); 
+        match *self {
+            Type::Constructor { target, position } => {
+                *result += map[target as usize].name;
+                *result += map[target as usize].variants[position as usize - 1].0
+            },
+            Type::Sum(n, ref v) => {
+                *result += map[n as usize].name;
+                result.push_str("(");
+                v[0].to_string_base(result, call_self);
+                for t in v.iter().skip(1) {
+                    result.push_str(", ");
+                    t.to_string_base(result, call_self);
+                }
+                result.push_str(")")
+            },
+            _ => self.to_string_base(result, call_self),
+        }
+    }
+
+    fn to_string_base<F: Fn(&Self, &mut String)>(&self, dst: &mut String, f: F) {
+        match *self {
+            Type::Unit => dst.push_str("()"),
+            Type::Int => dst.push_str("int"),
+            Type::Bool => dst.push_str("bool"),
+            Type::String => dst.push_str("string"),
+            Type::Constructor { target, position } => *dst += &format!("~{}::{}", target, position),
+            Type::Function(ref from, ref to) => {
+                if let Type::Function (..) = **from {
+                    dst.push_str("(");
+                    f(from.as_ref(), dst);
+                    dst.push_str(") -> ");
+                } else {
+                    f(from.as_ref(), dst);
+                   dst.push_str(" -> ");
+                }
+                f(to.as_ref(), dst)
+            }
+            Type::Tuple(ref v) => {
+                dst.push_str("(");
+                f(&v[0], dst);
+                for t in v.iter().skip(1) {
+                    dst.push_str(", ");
+                    f(t, dst);
+                }
+                dst.push_str(")")
+            }
+            Type::Sum(n, ref v) => {
+                *dst += &format!("~{}(", n);
+                f(&v[0], dst);
+                for t in v.iter().skip(1) {
+                    dst.push_str(", ");
+                    f(t, dst);
+                }
+                dst.push_str(")")
+            },
+            Type::Generic(n) => *dst += &format!("{}", ('a' as u16 + n) as u8 as char),
+            Type::Variable(n) => *dst += &format!("{}", n),
+        }
+    }
 }
 
 impl fmt::Debug for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> fmt::Result {
-        match *self {
-            Type::Unit => write!(f, "()"),
-            Type::Int => write!(f, "int"),
-            Type::Bool => write!(f, "bool"),
-            Type::String => write!(f, "string"),
-            Type::Constructor { target, position }=> write!(f, "~{}::{}", target, position),
-            Type::Function(ref from, ref to) => {
-                if let Type::Function (..) = **from {
-                    write!(f, "(")?;
-                    from.as_ref().fmt(f)?;
-                    write!(f, ") -> ")?;
-                } else {
-                    from.as_ref().fmt(f)?;
-                    write!(f, " -> ")?;
-                }
-                to.as_ref().fmt(f)
-            }
-            Type::Tuple(ref v) => {
-                write!(f, "(")?;
-                v[0].fmt(f)?;
-                for t in v.iter().skip(1) {
-                    write!(f, ", ")?;
-                    t.fmt(f)?;
-                }
-                write!(f, ")")
-            }
-            Type::Sum(n, ref t) => {
-                write!(f, "~{}(", n)?;
-                t.fmt(f)?;
-                write!(f, ")")
-            },
-            Type::Generic(n) => write!(f, "{}", ('a' as u16 + n) as u8 as char),
-            Type::Variable(n) => write!(f, "{}", n),
-        }
+        let mut s = String::new();
+        fn to_string_base(t: &Type, dst: &mut String) {t.to_string_base(dst, to_string_base)}
+        self.to_string_base(&mut s, to_string_base);
+        write!(f, "{}", s)
     }
 }
 
