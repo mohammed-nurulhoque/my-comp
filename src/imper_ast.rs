@@ -105,6 +105,12 @@ pub enum Expr<'input> {
     Closure(u16),
     /// Apply e1 on e2
     Application(Box<Expr<'input>>, Box<Expr<'input>>),
+    /// Constructor Application
+    SumVal {
+        target: u16,
+        position: u16,
+        value: Box<Expr<'input>>,
+    },
 
     /// if e1 then e2 else e3
     Conditional(Box<Expr<'input>>, Box<Expr<'input>>, Box<Expr<'input>>),

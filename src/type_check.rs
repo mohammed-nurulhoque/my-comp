@@ -596,6 +596,14 @@ impl<'input> Expr<'input> {
                 (iExpr::Tuple(v2), nnext)
             }
             Expr::Application(e1, e2) => {
+                // TODO : if e1 is constructor ...
+                if let Expr::Bound(s) = *e1 {
+                    match args.namescope.get(s) {
+                        Some((_, Type::Constructor { target, position })) => (), // unimplemented!(),
+                        Some(_) => (), // unimplemented!(),
+                        None => (), // unimplemented!(),
+                    }
+                }
                 args.type_consts.push((
                     Type::Variable(next),
                     Type::Function(
