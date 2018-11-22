@@ -6,6 +6,7 @@ use crate::types::{ProtoType, Literal, BinOpcode, UnOpcode};
 /// every top level declaration is of this type
 #[derive(Debug)]
 pub enum Binding<'input> {
+    /// A type declaration
     Type {
         /// name to bind the type to
         name: &'input str, 
@@ -13,7 +14,7 @@ pub enum Binding<'input> {
         vars: Vec<&'input str>,
         /// variants' names and arguments' types
         variants: Vec<(&'input str, ProtoType<'input>)> },
-    /// bool for is recursive?
+    /// A value binding, bool for is recursive?
     Value(Pattern<'input>, Expr<'input>, bool),
 }
 
@@ -30,6 +31,8 @@ pub enum Pattern<'input> {
     Tuple(Vec<Pattern<'input>>),
     /// matches a variant of a sum type and its argument with leading path
     SumVar(&'input str, Box<Pattern<'input>>),
+    /// Parse error
+    Error(usize, usize),
 }
 
 /// An expression or RHS that evaluates to a value,
@@ -53,4 +56,6 @@ pub enum Expr<'input> {
     Application(Box<Expr<'input>>, Box<Expr<'input>>),
     /// if e1 then e2 else e3
     Conditional(Box<Expr<'input>>, Box<Expr<'input>>, Box<Expr<'input>>),
+    /// Parse error
+    Error(usize, usize),
 }

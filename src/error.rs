@@ -9,7 +9,7 @@ use crate::types::Type;
 #[derive(Debug)]
 pub enum Error<'input> {
     IOErr(ioErr),
-    ParseErr,
+    ParseErr(usize),
     TypeMismatch(Type, Type),
     ConstructorUnification,
     NameNotFound(&'input str),

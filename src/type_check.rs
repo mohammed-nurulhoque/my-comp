@@ -60,7 +60,8 @@ mod test {
         ];
         let mut type_map = vec![("List", 0)].into_iter().collect();
         let mut ns = NameScope::new();
-        let dec = get_type_decl("BTree", vars, variants, &mut type_map, &mut ns);
+        let mut errors = Vec::new();
+        let dec = get_type_decl("BTree", vars, variants, &mut type_map, &mut ns, &mut errors);
         assert_eq!(dec.name, "BTree");
         assert_eq!(dec.num_generics, 1);
         assert_eq!(
@@ -206,6 +207,7 @@ pub fn ast2imper_ast(bindings: Vec<Binding>) -> Result<Module, Error> {
                 variants,
                 &mut type_map,
                 args.namescope,
+                args.errors,
             )),
             Binding::Value(pat, expr, is_rec) => {
                 globals.push(binding_transform(val_order, pat, expr, is_rec, &mut args)?);
@@ -306,6 +308,7 @@ fn get_type_decl<'input>(
     variants: Vec<(&'input str, ProtoType<'input>)>,
     type_map: &mut HashMap<&'input str, u16>,
     namescope: &mut NameScope<'input>,
+    errors: &mut Vec<Error<'input>>,
 ) -> TypeDecl<'input> {
     let generics_map: HashMap<&'input str, u16> = vars
         .into_iter()
@@ -321,7 +324,10 @@ fn get_type_decl<'input>(
             .into_iter()
             .enumerate()
             .map(|(i, (s, t))| {
-                let t = t.to_type(type_map, &generics_map);
+                let t = match t.to_type(type_map, &generics_map) {
+                    Ok(t) => t,
+                    Err(e) => { errors.push(e); Type::Unit }
+                };
                 namescope.local().insert(
                     s,
                     (
@@ -385,7 +391,7 @@ fn fn_transform<'a, 'b, 'input>(
             ValPath::CaptureCaptured(n, _) | ValPath::CaptureLocal(n, _) => {
                 captures.push((n, (val, t)))
             }
-            _ => panic!("non capture not expected here"),
+            _ => panic!("non capture value path not expected here"),
         }
     }
     captures.sort_unstable_by(|(ord1, _), (ord2, _)| ord1.cmp(ord2));
@@ -418,6 +424,7 @@ impl<'input> Pattern<'input> {
         val_consts: &mut BTreeMap<ValPath, ConstraintValue<'input>>,
     ) -> u16 {
         match self {
+            Pattern::Error(..) => panic!("Parse Error not supposed to be propagated"),
             Pattern::Wild => next,
             Pattern::Literal(l) => {
                 args.type_consts.push((Type::Variable(var), l.get_type()));
@@ -511,6 +518,7 @@ impl<'input> Expr<'input> {
             (e1, e2, next)
         };
         match self {
+            Expr::Error(..) => panic!("Parse Error not supposed to be propagated"),
             Expr::Literal(l) => {
                 args.type_consts.push((Type::Variable(var), l.get_type()));
                 (iExpr::Literal(l), next)

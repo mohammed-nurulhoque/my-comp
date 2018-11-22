@@ -2,7 +2,7 @@ use crate::{
     ast::*,
     types::{ProtoType, Literal, BinOpcode, UnOpcode}
 };
-grammar;
+grammar<'err>(errors: &'err mut Vec<(usize)>);
 
 pub Program: Vec<Binding<'input>> = {
     Statement*,
@@ -67,6 +67,7 @@ Pattern: Pattern<'input> = {
     ID => Pattern::Bind(<>),
     "(" <v:Comma2<PatternH>> ")" => Pattern::Tuple(v),
     "(" <PatternH> ")",
+    <start: @L> ! <end: @R> => { errors.push(start); Pattern::Error(<>) },
 };
 
 PatternH: Pattern<'input> = {
@@ -99,6 +100,7 @@ SimpleType: ProtoType<'input> = {
     <ID> => ProtoType::Generic(<>),
     <name:ID> <tp:SimpleType> => ProtoType::Sum(name, Box::new(tp)),
     "(" <Comma2<Type>> ")" => ProtoType::Tuple(<>),
+    <start: @L> ! <end: @R> => { errors.push(start); ProtoType::Error(<>) },
 };
 
 pub Expr = Class<Op0,Expr1>;       // and or
@@ -127,6 +129,7 @@ Base: Expr<'input> = {
     <bound:ID> => Expr::Bound(bound),
     "(" <Comma2<Expr>> ")" => Expr::Tuple(<>),
     "(" <Expr> ")",
+    <start: @L> ! <end: @R> => { errors.push(start); Expr::Error(<>) },
 };
 
 Literal: Literal<'input> = {
@@ -171,5 +174,5 @@ Op5: UnOpcode = {
 };
 
 ID: &'input str = {
-    r"[a-zA-Z_'][a-zA-Z_'0-9]*" => <>,
+    r"[a-zA-Z_][a-zA-Z_'0-9]*" => <>,
 }

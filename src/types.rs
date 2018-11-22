@@ -3,7 +3,10 @@ use std::{
     collections::HashMap,
     fmt,
 };
-use crate::imper_ast::TypeDecl;
+use crate::{
+    imper_ast::TypeDecl,
+    error::Error,
+};
 
 #[derive(Debug)]
 pub enum ProtoType<'input> {
@@ -13,6 +16,8 @@ pub enum ProtoType<'input> {
     Tuple(Vec<ProtoType<'input>>),
     Sum(&'input str, Box<ProtoType<'input>>),
     Generic(&'input str),
+    /// Parse error
+    Error(usize, usize),
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -159,31 +164,43 @@ impl<'input> ProtoType<'input> {
         self,
         type_map: &HashMap<&'input str, u16>, // map of type names -> index in types vector
         generics_map: &HashMap<&'input str, u16>,
-    ) -> Type {
+    ) -> Result<Type,Error<'input>> {
         use self::ProtoType as P;
         use self::Type as T;
         match self {
-            P::Unit => T::Unit,
-            P::Int => T::Int,
-            P::Bool => T::Bool,
-            P::String => T::String,
-            P::Tuple(v) => T::Tuple(v.into_iter().map(|t| t.to_type(type_map, generics_map)).collect()),
-            P::Function(from, to) => T::Function(
-                Box::new(from.to_type(type_map, generics_map)),
-                Box::new(to.to_type(type_map, generics_map)),
-            ),
+            P::Unit => Ok(T::Unit),
+            P::Int => Ok(T::Int),
+            P::Bool => Ok(T::Bool),
+            P::String => Ok(T::String),
+            P::Tuple(v) => Ok(T::Tuple({
+                let mut u = Vec::new();
+                for t in v.into_iter() {
+                    u.push(t.to_type(type_map, generics_map)?);
+                }
+                u            })),
+            P::Function(from, to) => Ok(T::Function(
+                Box::new(from.to_type(type_map, generics_map)?),
+                Box::new(to.to_type(type_map, generics_map)?),
+            )),
             P::Generic(name) => match generics_map.get(&name) {
-                Some(&n) => T::Generic(n),
-                None => panic!("Error, generic not found"),
+                Some(&n) => Ok(T::Generic(n)),
+                None => Err(Error::NameNotFound(name)),
             },
             P::Sum(name, t) => match type_map.get(&name) {
                 Some(&n) => if let P::Tuple(v) = *t {
-                    T::Sum(n, v.into_iter().map(|t| t.to_type(type_map, generics_map)).collect())
+                    Ok(T::Sum(n, {
+                        let mut u = Vec::new();
+                        for t in v.into_iter() {
+                            u.push(t.to_type(type_map, generics_map)?);
+                        }
+                        u
+                    }))
                 } else {
-                    T::Sum(n, vec![t.to_type(type_map, generics_map)])
+                    Ok(T::Sum(n, vec![t.to_type(type_map, generics_map)?]))
                 }
                 None => panic!("should be error type not defined"),
             },
+            P::Error(..) => panic!("Parse Error not supposed to be propagated"),
         }
     }
 }

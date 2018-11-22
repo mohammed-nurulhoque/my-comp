@@ -1,0 +1,8 @@
+type list t =
+ | nil
+ | cons (t, list t)
+
+rec fn append = {
+    nil right => right,
+    (x::left) right => x::append (left, "type error"),
+}
