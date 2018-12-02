@@ -1,5 +1,5 @@
 [package]
-name = "mylang"
+name = "clog"
 version = "0.1.0"
 authors = ["Mohammed Alateyya <mnur@cmu.edu>"]
 edition = "2018"
@@ -10,3 +10,4 @@ lalrpop = "0.16.1"
 [dependencies]
 lalrpop-util = "0.16.1"
 regex = "1.0.5"
+peterson = { path="../../peterson" }

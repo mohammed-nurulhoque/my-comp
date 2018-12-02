@@ -1,6 +1,5 @@
 use regex::Regex;
 use std::{
-    io::prelude::*,
     fs::File,
 };
 use lalrpop_util::ParseError;

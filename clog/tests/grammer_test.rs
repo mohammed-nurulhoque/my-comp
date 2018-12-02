@@ -1,8 +1,8 @@
-use mylang::parse::uncomment;
+use clog::parse::uncomment;
 #[cfg(test)]
 mod test {
     use {
-        mylang::{
+        clog::{
             grammar, 
             type_check,
             parse,

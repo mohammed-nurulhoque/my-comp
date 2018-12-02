@@ -10,3 +10,4 @@ mod unify;
 mod dtree;
 mod namescope;
 pub mod parse; // make private
+mod ir;
