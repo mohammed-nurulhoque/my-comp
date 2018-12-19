@@ -1,6 +1,6 @@
 /settings.json
 /Cargo.lock
 /target
-/src/grammar.rs
+/clog/src/grammar.rs
 **/*.rs.bk
 .vscode/launch.json
