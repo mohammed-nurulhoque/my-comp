@@ -6,7 +6,7 @@ type List t =
     | nil ()
     | cons (t, List t)
 
-rec fn map = {
+rec map = {
     f (nil ()) => nil (),
     f (cons (x, L)) => cons(f x, map f L),
 }
@@ -14,42 +14,42 @@ rec fn map = {
 
 let squares = map {x => x * x} (cons (0, cons(1, cons(2, nil ()))))
 
-rec fn range = {
+rec range = {
     i j => if i = j then nil () else cons(i, range (i+1) j) end,
 }
 
-rec fn filter = {
+rec filter = {
     f (nil ()) => nil (),
     f (cons (x, L)) => if f x then cons (x, filter f L) else filter f L end,
 }
 
-fn odds = {
+let odds = {
     i => filter {x => x % 2 = 1} (range 0 i),
 }
 
 let odds = odds 10
 
-rec fn reduce = {
+rec reduce = {
     f b (nil ()) => b,
     f b (cons (x, L)) => f x (reduce f b L),
 }
 
-rec fn append = {
+rec append = {
     (nil ()) right => right,
     (cons (x, left)) right => cons(x, append (left, right))
 }
 
-rec fn qsort = {
+rec qsort = {
     (nil ()) => nil (),
     cons(x, L) => append (filter {y => y < x} L) (cons (x, filter {y => y > x} L)),
 }
 
-rec fn inorder = {
+rec inorder = {
     (leaf ()) => nil (),
     (node (left, v, right)) => append (inorder left, cons (v, inorder right)),
 }
 
-fn square = {
+let square = {
     x => x * x
 }
 

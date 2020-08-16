@@ -1,8 +1,5 @@
 //! A namescope Module. A namescope is a series of nested scopes each having its bound
 //! names. A scope can capture a name from a parent scope.
-//! # FUTURE
-//! Special case the static namescope because it shouldn't have Local and Capture,
-//! and the inner scopes shouldn't have StaticFn or Capture
 use std::collections::HashMap;
 use crate::{
     types::Type,

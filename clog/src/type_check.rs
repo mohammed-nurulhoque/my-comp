@@ -8,9 +8,9 @@ use crate::{
     ast::{Binding, Expr, Pattern},
     dtree::DTree,
     error::Error,
-    imper_ast::{Closure, ConstraintValue, Expr as iExpr, Module, TypeDecl, ValPath},
+    imper_ast::{Closure, ConstraintValue, Expr as iExpr, Module, ValPath},
     namescope::NameScope,
-    types::{BinOpcode, Literal, ProtoType, Type, UnOpcode},
+    types::{BinOpcode, Literal, ProtoType, Type, UnOpcode,  TypeDecl},
     unify,
 };
 

@@ -2,7 +2,8 @@ use crate::{
     ast::*,
     types::{ProtoType, Literal, BinOpcode, UnOpcode}
 };
-grammar<'err>(errors: &'err mut Vec<(usize)>);
+
+grammar<'err>(errors: &'err mut Vec<usize>);
 
 pub Program: Vec<Binding<'input>> = {
     Statement*,
@@ -53,8 +54,7 @@ ValBinding: Binding<'input> = {
 };
 
 FnBinding: Binding<'input> = {
-    "fn" <name:ID> "=" "{" <v:Comma<Arm>> "}" => Binding::Value(Pattern::Bind(name), Expr::Closure(v), false),
-    "rec" "fn" <name:ID> "=" "{" <v:Comma<Arm>> "}" => Binding::Value(Pattern::Bind(name), Expr::Closure(v), true),
+    "rec" <name:ID> "=" "{" <v:Comma<Arm>> "}" => Binding::Value(Pattern::Bind(name), Expr::Closure(v), true),
 };
 
 Arm = {

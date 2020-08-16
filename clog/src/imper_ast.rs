@@ -9,20 +9,20 @@ use std::collections::{
 };
 use crate::{
     dtree::DTree,
-    types::{Type, Literal, BinOpcode, UnOpcode},
+    types::{Type, Literal, BinOpcode, UnOpcode, TypeDecl},
 };
 
 /// represents a compilation module (a single file)
 #[derive(Debug)]
 pub struct Module<'input> {
     /// all closures including top-level functions
-    pub closures: Vec<(Closure<'input>)>,
+    pub closures: Vec<Closure<'input>>,
     /// vector of global values, each declaration is a single value
     /// e.g. (x, y) = (1, 2) is a single value. The BTreeMap has any
     /// literal constraints on global values e.g.
     /// (1, 2) = f 5;
     pub globals: Vec<(Expr<'input>, BTreeMap<ValPath, ConstraintValue<'input>>, Type)>,
-    /// path of each global name including top-level functions
+    /// path of exported global name including top-level functions
     pub globals_names: HashMap<&'input str, ValPath>,
     pub type_decls: Vec<TypeDecl<'input>>,
 }
@@ -34,7 +34,7 @@ pub struct Module<'input> {
 /// In a sum(i, v) that has path p, [..p, 0] is the path of the tag of the type and
 /// [..p, i] is the path for the v in the ith variant. This means, [..p, 0] should be checked
 /// before accessing [..p, i] otherwise it can be unsafe.
-/// A captured values has index in captured values and the capture path in parent scope
+/// A captured value has index in captured values and the capture path in parent scope
 /// if a closure captures a value from a higher scope, all closures in between have to capture it.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum ValPath {
@@ -48,21 +48,12 @@ pub enum ValPath {
     /// capture a value that is local to the parent scope
     /// ### Args
     /// - index in captured values
-    /// - path in parent scope
+    /// - path in parent scope unwrapped from Local()
     CaptureLocal(u16, Vec<u16>),
-    /// a global value, 1st arg is index in Module.globals and 2nd is path in its expr
+    /// a global value, 
     StaticVal(Vec<u16>),
     /// just a marker, constructors are not stored anywhere
     Constructor,
-}
-
-/// Representation of a sum type
-#[derive(Debug)]
-pub struct TypeDecl<'input> {
-    pub name: &'input str,
-    /// number of types on which this is generic
-    pub num_generics: u16,
-    pub variants: Vec<(&'input str,Type)>,
 }
 
 /// Represents both static (top-level functions) and dynamic closures

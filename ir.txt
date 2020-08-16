@@ -1,0 +1,39 @@
+fold f b [] = []
+fold f b (x:L) = f x (fold f b L)
+
+:FOLD_ARG1
+curried[0] = stack[0] 
+start_ptr = :FOLD_ARG2
+return self_frame
+
+:FOLD_ARG2
+curried[1] = stack[0] 
+start_ptr = :FOLD_ARG3
+return self_frame
+
+:FOLD_ARG3
+_0 = stack[0].tag 
+_1 = (= _0 0) 
+jmpfalse _1 :CASE_CONS
+return self_frame
+
+:CASE_NIL
+_2 = construct(0, 0, ()) 
+return _2
+
+:CASE_CONS
+_3 = new_frame fold
+_4 = call_frame _3 stack[0]
+_5 = call_frame _4 stack[1]
+_6 = call_frame _5 stack[2].value<cons>[1]
+_7 = copy_frame f
+_8 = call_frame _7 stack[2].value<cons>[0]
+_9 = call_frame _8 _6
+return _9
+
+eval num k = k num
+eval (+ e1 e2) num = eval e1 ((e1') => eval e2 ((e2') => k (e1' + e2')))
+eval (- e1 e2) num = eval e1 ((e1') => eval e2 ((e2') => k (e1' - e2')))
+eval (* e1 e2) num = eval e1 ((e1') => eval e2 ((e2') => k (e1' * e2')))
+eval (/ e1 e2) num = eval e1 ((e1') => if e2 = 0 then Err! 
+									   else eval e2 ((e2') => k (e1' + e2')))

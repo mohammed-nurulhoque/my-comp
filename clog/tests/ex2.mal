@@ -1,0 +1,28 @@
+type List[t] = {
+    Nil: (),
+    Cons: t * List[t]
+}
+
+type Map[key,val] = List[key*val]
+
+type id = int
+
+type IDMap[val] = Map[id,val]
+
+type stack[T] = abstract[t] <
+    empty: t[T],
+    push: t[T] -> T -> t[T],
+    pop: t[T] -> (T * t[T])?
+>
+
+ListStack: stack[T] = package <
+    empty = Nil (),
+    push = fn { st => fn { el => Cons(el, st) }},
+    pop = fn { Nil () => None, Cons(el, st) => Some (el, st) }
+>
+
+type id = abstract int
+id1 = package 1
+
+
+rec fact = fn { 0 => 1 | n => n * fact (n-1) }

@@ -4,9 +4,24 @@ use std::{
     fmt,
 };
 use crate::{
-    imper_ast::TypeDecl,
     error::Error,
 };
+
+
+/// Representation of a sum type
+#[derive(Debug)]
+pub struct TypeDecl<'input> {
+    pub name: &'input str,
+    
+    /// number of generics
+    pub num_generics: u16,
+
+    #[cfg(debug_assertions)]
+    pub variants: Vec<(&'input str, Type)>,
+
+    #[cfg(not(debug_assertions))]
+    pub variants: Vec<Type>
+}
 
 #[derive(Debug)]
 pub enum ProtoType<'input> {
@@ -42,15 +57,18 @@ pub enum Type {
 }
 
 impl Type {
-    pub fn pretty_format(&self, result: &mut String, map: &Vec<TypeDecl>){
-        let call_self = |t: &Self, dst: &mut String| t.pretty_format(dst, map); 
+    pub fn pretty_format(
+        &self,result: &mut String,
+        types: &Vec<TypeDecl>
+    ){
+        let call_self = |t: &Self, dst: &mut String| t.pretty_format(dst, types); 
         match *self {
             Type::Constructor { target, position } => {
-                *result += map[target as usize].name;
-                *result += map[target as usize].variants[position as usize - 1].0
+                *result += types[target as usize].name;
+                *result += types[target as usize].variants[position as usize - 1].0
             },
             Type::Sum(n, ref v) => {
-                *result += map[n as usize].name;
+                *result += types[n as usize].name;
                 result.push_str("(");
                 v[0].to_string_base(result, call_self);
                 for t in v.iter().skip(1) {

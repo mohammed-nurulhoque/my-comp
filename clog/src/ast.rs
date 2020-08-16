@@ -52,7 +52,8 @@ pub enum Expr<'input> {
 
     /// A closure is a sequence of patterns and corresponsing expressions
     Closure(Vec<(Vec<Pattern<'input>>, Expr<'input>)>),
-    /// Apply an expression on an expression
+    /// Apply an expression on an expression,
+    /// including constructing values of sum types
     Application(Box<Expr<'input>>, Box<Expr<'input>>),
     /// if e1 then e2 else e3
     Conditional(Box<Expr<'input>>, Box<Expr<'input>>, Box<Expr<'input>>),
