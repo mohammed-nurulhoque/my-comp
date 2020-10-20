@@ -81,7 +81,7 @@ mod test {
         assert_eq!(
             ns.get("Nil").unwrap(),
             &(
-                ValPath::Constructor,
+                ValPath::Constructor(1, 1),
                 Type::Constructor {
                     target: 1,
                     position: 1,
@@ -91,7 +91,7 @@ mod test {
         assert_eq!(
             ns.get("Node").unwrap(),
             &(
-                ValPath::Constructor,
+                ValPath::Constructor(1, 2),
                 Type::Constructor {
                     target: 1,
                     position: 2,
@@ -117,7 +117,7 @@ mod test {
         ns.local().insert(
             "cons",
             (
-                ValPath::Constructor,
+                ValPath::Constructor(0, 2),
                 Type::Constructor {
                     position: 2 as u16,
                     target: 0,
@@ -268,7 +268,6 @@ fn binding_transform<'a, 'b, 'input>(
     let closures_num = args.closures.len();
     // we don't insert directly into the scope because we want to do type unification
     // before inserting finally
-    print!("{:?}: ", pat);
     let expr = if is_rec {
         args.namescope.push_layer();
         let next = pat.transform(0, 1, &mut path, args, ValPath::StaticVal, &mut val_consts);
@@ -297,8 +296,8 @@ fn binding_transform<'a, 'b, 'input>(
     t.substitute_vars(&mut map);
     t.generalize_type();
     let mut pretty = String::new();
-    t.pretty_format(&mut pretty, args.type_decls);
-    println!("{}",pretty);
+    // t.pretty_format(&mut pretty, args.type_decls);
+    // println!("{}",pretty);
     Ok((expr, val_consts, t))
 }
 
@@ -331,7 +330,7 @@ fn get_type_decl<'input>(
                 namescope.local().insert(
                     s,
                     (
-                        ValPath::Constructor,
+                        ValPath::Constructor(len, (i+1) as u16),
                         Type::Constructor {
                             target: len,
                             position: (i + 1) as u16,
@@ -479,7 +478,7 @@ impl<'input> Pattern<'input> {
                                 p
                             }),
                             // position starts from 1
-                            ConstraintValue::Finite(position, t.variants.len() as u16),
+                            ConstraintValue::Finite(position - 1, t.variants.len() as u16),
                         );
 
                         let (from, n1) = t.variants[position as usize - 1].1.instantiate(next + 1);

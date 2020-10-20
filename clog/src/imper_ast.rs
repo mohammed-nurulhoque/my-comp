@@ -53,7 +53,7 @@ pub enum ValPath {
     /// a global value, 
     StaticVal(Vec<u16>),
     /// just a marker, constructors are not stored anywhere
-    Constructor,
+    Constructor(u16, u16),
 }
 
 /// Represents both static (top-level functions) and dynamic closures

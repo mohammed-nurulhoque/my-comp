@@ -36,7 +36,9 @@ Comma2<T>: Vec<T> = {
 }
 
 TypeDecl: Binding<'input> = {
-    "type" <name:ID> <vars:TypeVars> "=" <variants:SumVarDecl+> => Binding::Type {<>},
+    "type" <name:ID> <vars:TypeVars?> "=" <variants:SumVarDecl+> => {
+        Binding::Type { name, vars: vars.unwrap_or(vec![]), variants }
+    }
 };
 
 TypeVars: Vec<&'input str> = {
@@ -134,7 +136,7 @@ Base: Expr<'input> = {
 
 Literal: Literal<'input> = {
     r#""(\\.|[^"\\])*""# => Literal::String(&<>[1..(<>.len()-1)]),
-    r"-?[0-9]+" => Literal::Int(isize::from_str_radix(<>, 10).unwrap()),
+    r"[0-9]+" => Literal::Int(isize::from_str_radix(<>, 10).unwrap()),
     "true" => Literal::Bool(true),
     "false" => Literal::Bool(false),
     "()" => Literal::Unit,

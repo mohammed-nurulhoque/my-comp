@@ -166,7 +166,7 @@ impl<'input> DTree<'input> {
         for (value, consted) in map.iter().rev() {
             match *consted {
                 Finite(m, n) => {
-                    let mut branches: Vec<_> = (1..=n)
+                    let mut branches: Vec<_> = (0..n)
                         .map(|i| {
                             if i == m {
                                 DTree::Empty
@@ -175,7 +175,7 @@ impl<'input> DTree<'input> {
                             }
                         })
                         .collect();
-                    branches[m as usize - 1] = tail;
+                    branches[m as usize] = tail;
                     tail = DTree::Finite {
                         value: value.clone(),
                         branches,
@@ -205,7 +205,7 @@ impl<'input> DTree<'input> {
             Finite { ref value, ref mut branches } if map.contains_key(value) => {
                 if let ConstraintValue::Finite(n, _) = map.remove(value).unwrap() {
                     // !!!
-                    branches[n as usize - 1].add_pattern(map, exit)
+                    branches[n as usize].add_pattern(map, exit)
                 } else {
                     panic!("infinite & finite contradiction")
                 }
@@ -245,17 +245,17 @@ impl<'input> DTree<'input> {
                     Value::Bool(false) => branches[0].match_tree(valvec),
                     Value::Bool(true)  => branches[1].match_tree(valvec),
                     // XXX: double check off by 1.
-                    Value::SumVar(n, m, _) => branches[m as usize].match_tree(valvec),
+                    Value::Tag(n) => branches[n as usize].match_tree(valvec),
                     _ => Err(IntrpErr::TypeMismatch),
                 }
             }
             &DTree::Infinite {value: ValPath::Local(ref v), ref branches, ref default} => {
                 match *pathvec_from_valvec(v, valvec)? {
                     Value::Int(n) => {
-                        branches.get(&ConstraintValue::Int(n)).unwrap_or(&DTree::Empty).match_tree(valvec)
+                        branches.get(&ConstraintValue::Int(n)).unwrap_or(default).match_tree(valvec)
                     },
                     Value::String(ref s) => {
-                        branches.get(&ConstraintValue::Str(s)).unwrap_or(&DTree::Empty).match_tree(valvec)
+                        branches.get(&ConstraintValue::Str(s)).unwrap_or(default).match_tree(valvec)
                     },
                     _ => Err(IntrpErr::TypeMismatch)
                 }

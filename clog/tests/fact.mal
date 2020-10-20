@@ -1,0 +1,9 @@
+rec fact = {
+    0 => 1,
+    n => n * fact (n-1),
+}
+
+let f0 = fact 0
+let f1 = fact 1
+let f5 = fact 5
+let f9 = fact 9

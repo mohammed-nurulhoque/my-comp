@@ -14,7 +14,7 @@ mod tests {
     fn test() {
         let ns0 = NameScope { head: Some(Box::new(ScopeList {
             local: HashMap::from_iter(vec![
-                ("foxbar", (ValPath::Constructor, Type::Bool)),
+                ("foxbar", (ValPath::Constructor(0, 1), Type::Bool)),
                 ("cnnbar", (ValPath::Local(vec![0]), Type::Bool)),
             ]),
             captures_sz: 0,
@@ -127,7 +127,7 @@ impl<'input> NameScope<'input> {
         for (map, captures_sz) in self.iter().skip(1) {
             match map.get(key) {
                 None => (),
-                Some(val @ (ValPath::StaticVal(_), _)) | Some(val @ (ValPath::Constructor, _)) => 
+                Some(val @ (ValPath::StaticVal(_), _)) | Some(val @ (ValPath::Constructor(..), _)) => 
                     return unsafe { Some(&*(val as *const _)) },
                 Some(val) => {
                     result = Some(val);
@@ -162,7 +162,7 @@ fn insert_captured<'input>(
         &ValPath::Local(ref v) => ValPath::CaptureLocal(*captures_sz, v.clone()),
         &ValPath::CaptureLocal(u, _) | &ValPath::CaptureCaptured(u, _) => 
             ValPath::CaptureCaptured(*captures_sz, u),
-        &ValPath::StaticVal(_) | &ValPath::Constructor => panic!("Capture static not expected"),
+        &ValPath::StaticVal(_) | &ValPath::Constructor(..) => panic!("Capture static not expected"),
         
     };
     *captures_sz += 1;
