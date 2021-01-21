@@ -5,8 +5,8 @@ mod test {
             grammar, 
             type_check,
             parse,
-            interpret,
         },
+        cerebral::interpret,
         std::{
             fs::File,
             io::prelude::*,

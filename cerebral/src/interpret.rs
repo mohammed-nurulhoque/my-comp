@@ -9,11 +9,12 @@ use std::{
     },
 };
 
-use crate::{
+use clog::{
     imper_ast::{
         Module,
         ValPath,
         Expr,
+        ConstraintValue,
     },
     types::{
         Literal,
@@ -21,6 +22,7 @@ use crate::{
         BinOpcode,
         TypeDecl,
     },
+    dtree::DTree,
 };
 
 #[cfg(test)]
@@ -239,7 +241,7 @@ impl<'a,'input> Context<'a,'input> {
         &self, n: u16, captures: Vec<Rc<Value>>, locals: Vec<Rc<Value>>
     ) -> Result<Rc<Value>, IntrpErr> {
         let func = &self.module.closures[n as usize];
-        let matched_arm = func.dtree.match_tree(&locals)?;
+        let matched_arm = match_tree(&func.dtree, &locals)?;
         let ctx = Context {
             module: self.module,
             statics: self.statics.clone(),
@@ -353,5 +355,35 @@ impl Value {
         let mut s = String::new();
         _display(self, module, &mut s).expect("format error!");
         s
+    }
+}
+
+
+pub fn match_tree(tree: &DTree, valvec: &Vec<Rc<Value>>) -> Result<u16, IntrpErr> {
+    match tree {
+        &DTree::Empty => Err(IntrpErr::NonExhaustivePattern),
+        &DTree::Exit(m) => Ok(m),
+        &DTree::Finite { value: ValPath::Local(ref v), ref branches } => {
+            let val = pathvec_from_valvec(v, valvec)?;
+            match *val {
+                Value::Bool(false) => match_tree(&branches[0], valvec),
+                Value::Bool(true)  => match_tree(&branches[1], valvec),
+                // XXX: double check off by 1.
+                Value::Tag(n) => match_tree(&branches[n as usize], valvec),
+                _ => Err(IntrpErr::TypeMismatch),
+            }
+        }
+        &DTree::Infinite {value: ValPath::Local(ref v), ref branches, ref default} => {
+            match *pathvec_from_valvec(v, valvec)? {
+                Value::Int(n) => {
+                    match_tree(branches.get(&ConstraintValue::Int(n)).unwrap_or(default), valvec)
+                },
+                Value::String(ref s) => {
+                    match_tree(branches.get(&ConstraintValue::Str(s)).unwrap_or(default), valvec)
+                },
+                _ => Err(IntrpErr::TypeMismatch)
+            }
+        },
+        _ => Err(IntrpErr::InvalidPath),
     }
 }

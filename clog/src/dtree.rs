@@ -37,11 +37,6 @@ use std::{
 use crate::{
     imper_ast::ConstraintValue,
     imper_ast::ValPath,
-    interpret::{
-        Value,
-        pathvec_from_valvec,
-        IntrpErr,
-    }
 };
 
 #[cfg(test)]
@@ -232,35 +227,6 @@ impl<'input> DTree<'input> {
                 }
                 default.add_pattern(map, exit);
             }
-        }
-    }
-
-    pub fn match_tree(&self, valvec: &Vec<Rc<Value>>) -> Result<u16, IntrpErr> {
-        match self {
-            &DTree::Empty => Err(IntrpErr::NonExhaustivePattern),
-            &DTree::Exit(m) => Ok(m),
-            &DTree::Finite { value: ValPath::Local(ref v), ref branches } => {
-                let val = pathvec_from_valvec(v, valvec)?;
-                match *val {
-                    Value::Bool(false) => branches[0].match_tree(valvec),
-                    Value::Bool(true)  => branches[1].match_tree(valvec),
-                    // XXX: double check off by 1.
-                    Value::Tag(n) => branches[n as usize].match_tree(valvec),
-                    _ => Err(IntrpErr::TypeMismatch),
-                }
-            }
-            &DTree::Infinite {value: ValPath::Local(ref v), ref branches, ref default} => {
-                match *pathvec_from_valvec(v, valvec)? {
-                    Value::Int(n) => {
-                        branches.get(&ConstraintValue::Int(n)).unwrap_or(default).match_tree(valvec)
-                    },
-                    Value::String(ref s) => {
-                        branches.get(&ConstraintValue::Str(s)).unwrap_or(default).match_tree(valvec)
-                    },
-                    _ => Err(IntrpErr::TypeMismatch)
-                }
-            },
-            _ => Err(IntrpErr::InvalidPath),
         }
     }
 

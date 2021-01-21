@@ -1,0 +1,22 @@
+type Option t =
+    | Some t
+    | None ()
+type Exp =
+    | Literal int,
+    | Bound string,
+    | Sum (Exp, Exp),
+    | Product (Exp, Exp)
+
+let map_new = { name => None () }
+let map_add = {
+    map newkey value => { key =>
+        if key = newkey 
+        then val 
+        else map key 
+        end 
+    }}
+
+let eval = { map => {
+    (Literal n) => Some n,
+    (Bound name) => map name
+}
