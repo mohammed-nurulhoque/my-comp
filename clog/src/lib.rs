@@ -1,5 +1,4 @@
 #![feature(nll)]
-#![feature(slice_patterns)]
 #![feature(box_syntax)]
 //#![warn(missing_docs)]
 pub mod ast;

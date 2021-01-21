@@ -159,6 +159,8 @@ pub enum BinOpcode {
     Div,
     Mod,
 
+    Concat,
+
     Greater,
     Less,
     GreaterEq,

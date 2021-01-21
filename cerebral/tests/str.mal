@@ -1,0 +1,3 @@
+let _ = print "Test\n"
+let _ = print ("Hello" ++ "World\n")
+let _ = print (i2str 5)

@@ -2,12 +2,20 @@ type List t =
     | nil () // empty
     | cons (t, List t) // a head element and a tail list
 
+rec l2sh = {
+    (nil()) e2str => "]",
+    (cons (x, nil())) e2str => e2str x ++ "]",
+    (cons (x, l)) e2str => e2str x ++ ", " ++ l2sh l e2str
+}
+
+let list2str = {
+    l f => "[" ++ l2sh l f
+}
+
 rec map = {
     f (nil ()) => nil (),
     f (cons (x, L)) => cons(f x, map f L),
 }
-
-let squares2 = map {x => x * x} (cons (0, cons(1, cons(2, nil ()))))
 
 let square = {x => x * x}
 
@@ -17,15 +25,35 @@ rec range = {
 
 let first10Squares = map square (range 1 11)
 
+let _ = print (list2str first10Squares i2str ++ "\n")
+
 rec mapCps = {
     f (nil ()) k => k (nil ()),
     f (cons (x, L)) k => mapCps f L { L' => k (cons(f x, L')) },
 }
 
+rec filterCps = {
+    f (nil ()) k => k (nil()),
+    f (cons (x, L)) k => filterCps f L { L' => k ({
+        true => cons(x, L'), 
+        false => L'
+    } (f x))},
+}
+
 let first10Squares = mapCps square (range 1 11) { x => x }
+let evenSq = filterCps { x => x % 2 = 0 } first10Squares { x => x }
+let _ = print (list2str evenSq i2str ++ "\n")
+
 
 type Tagged =
     | Int int
     | String string
 
+let t2s = {
+    (Int n) => i2str n,
+    (String s) => s,
+}
+
 let mapped = map Int first10Squares
+
+let _ = print (list2str mapped t2s ++ "\n")

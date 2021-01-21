@@ -4,6 +4,8 @@
 //! to imperAST.
 
 use std::collections::{BTreeMap, HashMap};
+use std::iter::FromIterator;
+
 use crate::{
     ast::{Binding, Expr, Pattern},
     dtree::DTree,
@@ -185,6 +187,16 @@ pub fn ast2imper_ast(bindings: Vec<Binding>) -> Result<Module, Error> {
     let mut closures = Vec::new();
     let mut global_scope = NameScope::new();
     let mut globals = Vec::new();
+
+    // XXX hack
+    let map = HashMap::from_iter(vec![
+        ("print", (ValPath::Imported("print"), 
+            Type::Function(Box::new(Type::String), Box::new(Type::Unit)))),
+        ("i2str", (ValPath::Imported("i2str"),
+            Type::Function(Box::new(Type::Int), Box::new(Type::String)))),
+    ]);
+    global_scope.extend_local(map);
+
     let mut type_decls = Vec::new();
     let mut type_consts = Vec::new();
     let mut val_order = 0;
@@ -295,7 +307,7 @@ fn binding_transform<'a, 'b, 'input>(
     let mut t = Type::Variable(0);
     t.substitute_vars(&mut map);
     t.generalize_type();
-    let mut pretty = String::new();
+    // let mut pretty = String::new();
     // t.pretty_format(&mut pretty, args.type_decls);
     // println!("{}",pretty);
     Ok((expr, val_consts, t))
@@ -562,6 +574,10 @@ impl<'input> Expr<'input> {
                         args.type_consts.push((Type::Variable(next), Type::Int));
                         sequence(*e1, *e2, next, next, next + 1, args)
                     }
+                    Concat => {
+                        args.type_consts.push((Type::Variable(var), Type::String));
+                        sequence(*e1, *e2, var, var, next, args)
+                    }
                     Equal | NotEq => {
                         args.type_consts.push((Type::Variable(var), Type::Bool));
                         sequence(*e1, *e2, next, next, next + 1, args)
@@ -606,7 +622,7 @@ impl<'input> Expr<'input> {
                 // TODO : if e1 is constructor ...
                 if let Expr::Bound(s) = *e1 {
                     match args.namescope.get(s) {
-                        Some((_, Type::Constructor { target, position })) => (), // unimplemented!(),
+                        Some((_, Type::Constructor { .. })) => (), // unimplemented!(),
                         Some(_) => (), // unimplemented!(),
                         None => (), // unimplemented!(),
                     }

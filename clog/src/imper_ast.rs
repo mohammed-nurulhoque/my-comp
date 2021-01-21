@@ -54,6 +54,7 @@ pub enum ValPath {
     StaticVal(Vec<u16>),
     /// just a marker, constructors are not stored anywhere
     Constructor(u16, u16),
+    Imported(&'static str),
 }
 
 /// Represents both static (top-level functions) and dynamic closures

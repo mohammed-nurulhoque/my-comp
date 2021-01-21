@@ -1,11 +1,7 @@
 use regex::Regex;
-use std::{
-    fs::File,
-};
 use lalrpop_util::ParseError;
 use crate::{
     ast::Binding,
-    error::Error,
     grammar::ProgramParser,
 };
 

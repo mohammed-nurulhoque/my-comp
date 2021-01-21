@@ -162,6 +162,7 @@ Op2: BinOpcode = {
 Op3: BinOpcode = {
     "+" => BinOpcode::Add,
     "-" => BinOpcode::Sub,
+    "++" => BinOpcode::Concat,
 };
 
 Op4: BinOpcode = {

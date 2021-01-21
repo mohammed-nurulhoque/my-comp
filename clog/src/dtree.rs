@@ -31,7 +31,6 @@
 //!     replace with signular(C, tail = exit(i), default = T)
 
 use std::{
-    rc::Rc,
     collections::{BTreeMap, HashMap}
 };
 use crate::{
