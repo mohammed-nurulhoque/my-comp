@@ -2,7 +2,10 @@
 
 use std::env;
 use std::fs::File;
-use std::io::prelude::*;
+use std::io::{
+    stdin,
+    prelude::*
+};
 
 use clog::{
     parse,
@@ -24,4 +27,19 @@ fn main() {
     let module = type_check::ast2imper_ast(result).unwrap();
     let mut ctx = interpret::Context::new(&module);
     ctx.eval_toplevel();
+}
+
+fn repl() {
+    let mut s = String::new();
+    for line in stdin().lock().lines() {
+        s += line.unwrap().trim_right();
+        if s.chars().last().unwrap() == ';' {
+            s.pop();
+            let contents = parse::uncomment(&mut s);
+            let result = parse::parse(&contents).unwrap();
+            let module = type_check::ast2imper_ast(result).unwrap();
+            let mut ctx = interpret::Context::new(&module);
+            ctx.eval_toplevel();
+        }
+    }
 }
