@@ -177,13 +177,108 @@ mod test {
         assert_eq!(path, &[1]);
     }
 }
+
+
+/// A pair of types. Just more expressive
+type TypeConstraint = (Type, Type);
+
+pub struct TypingContext<'input> {
+    type_decls: Vec<TypeDecl<'input>>,
+    closures: Vec<Closure<'input>>,
+    globals: Vec<(iExpr<'input>, BTreeMap<ValPath, ConstraintValue<'input>>, Type)>,
+    namescope: NameScope<'input>,
+    type_consts: Vec<TypeConstraint>,
+    type_map: HashMap<&'input str, u16>,
+    errors: Vec<Error<'input>>,
+}
+
+impl<'input> TypingContext<'input> {
+    pub fn add_binding(&mut self, binding: Binding<'input>) -> Result<(), Error<'input>> {
+        match binding {
+            Binding::Type { name, vars, variants } => 
+                self.type_decls.push(get_type_decl(
+                    name,
+                    vars,
+                    variants,
+                    &mut self.type_map,
+                    &mut self.namescope,
+                    &mut self.errors,
+            )),
+            Binding::Value(pat, expr, is_rec) => {
+                let tuple = self.binding_transform(self.globals.len() as u16, pat, expr, is_rec)?;
+                self.globals.push(tuple)
+            }
+        }
+        Ok(())
+    }
+
+    /// Transform a top-level binding
+    /// # Arguments
+    /// - order in all top-level value bindings (the valpath)
+    /// - pattern
+    /// - expression
+    /// - is_rec: is recursive? if recursive, pattern added to scope before the expression
+    /// 
+    /// # Returns
+    /// Result(tranformed expression, constraints on the expression by the pattern, type of expression)
+    /// 
+    /// # Future
+    /// when non-top-level bindings are allowed, shouldn't generalize types here
+
+    fn binding_transform(
+        &mut self,
+        order: u16,
+        pat: Pattern<'input>,
+        expr: Expr<'input>,
+        is_rec: bool,
+    ) -> Result<(iExpr<'input>, BTreeMap<ValPath, ConstraintValue<'input>>, Type), Error<'input>> {
+        let mut path = vec![order];
+        let mut val_consts = BTreeMap::new();
+        // remember how many closures was already there. Closures are added to global closures vector
+        // as the expression is processed, i.e. before type unification. This means we have to change
+        // their types inside the global vector
+        let closures_num = self.closures.len();
+        // we don't insert directly into the scope because we want to do type unification
+        // before inserting finally
+        let expr = if is_rec {
+            self.namescope.push_layer();
+            let next = pat.transform(0, 1, &mut path, self, ValPath::StaticVal, &mut val_consts);
+            expr.transform(0, next, self).0
+        } else {
+            let (e, next) = expr.transform(0, 1, self);
+            self.namescope.push_layer();
+            pat.transform(0, next, &mut path, self, ValPath::StaticVal, &mut val_consts);
+            e
+        };
+        let mut type_consts = self.type_consts.drain(0..).collect();
+        let mut map = unify::unify(&mut type_consts)?;
+        let mut local = self.namescope.pop_layer();
+        for (_, (_, t)) in local.iter_mut() {
+            t.substitute_vars(&map);
+            t.generalize_type();
+        }
+        self.namescope.extend_local(local);
+
+        // chnage types of closures added for this binding
+        for closure in self.closures.iter_mut().skip(closures_num) {
+            closure.substitute_types(&map);
+        }
+
+        let mut t = Type::Variable(0);
+        t.substitute_vars(&mut map);
+        t.generalize_type();
+        // let mut pretty = String::new();
+        // t.pretty_format(&mut pretty, args.type_decls);
+        // println!("{}",pretty);
+        Ok((expr, val_consts, t))
+    }
+}
+
 /// The transformation function, takes a series of bindings in AST form,
 /// which are either value binding or type declarations. Converts to
 /// a Module struct (see imper_ast.rs) which separated functions and
 /// variables.
 pub fn ast2imper_ast(bindings: Vec<Binding>) -> Result<Module, Error> {
-    let mut errors = Vec::new();
-    let mut type_map = HashMap::new();
     let mut closures = Vec::new();
     let mut global_scope = NameScope::new();
     let mut globals = Vec::new();
@@ -198,35 +293,6 @@ pub fn ast2imper_ast(bindings: Vec<Binding>) -> Result<Module, Error> {
     global_scope.extend_local(map);
 
     let mut type_decls = Vec::new();
-    let mut type_consts = Vec::new();
-    let mut val_order = 0;
-    let mut args = Args {
-        type_decls: &mut type_decls,
-        closures: &mut closures,
-        namescope: &mut global_scope,
-        type_consts: &mut type_consts,
-        errors: &mut errors,
-    };
-    for binding in bindings {
-        match binding {
-            Binding::Type {
-                name,
-                vars,
-                variants,
-            } => args.type_decls.push(get_type_decl(
-                name,
-                vars,
-                variants,
-                &mut type_map,
-                args.namescope,
-                args.errors,
-            )),
-            Binding::Value(pat, expr, is_rec) => {
-                globals.push(binding_transform(val_order, pat, expr, is_rec, &mut args)?);
-                val_order += 1;
-            }
-        }
-    }
 
     Ok(Module {
         closures,
@@ -240,78 +306,6 @@ pub fn ast2imper_ast(bindings: Vec<Binding>) -> Result<Module, Error> {
     })
 }
 
-/// just more expressive
-type TypeConstraint = (Type, Type);
-
-/// wraps arguments for conciseness
-struct Args<'a, 'input> {
-    type_decls: &'a mut Vec<TypeDecl<'input>>,
-    closures: &'a mut Vec<Closure<'input>>,
-    namescope: &'a mut NameScope<'input>,
-    type_consts: &'a mut Vec<TypeConstraint>,
-    errors: &'a mut Vec<Error<'input>>,
-}
-
-/// Transform a top-level binding
-/// # Arguments
-/// - order in all top-level value bindings (the valpath)
-/// - pattern
-/// - expression
-/// - is_rec: is recursive? if recursive, pattern added to scope before the expression
-/// 
-/// # Returns
-/// Result(tranformed expression, constraints on the expression by the pattern, type of expression)
-/// 
-/// # Future
-/// when non-top-level bindings are allowed, shouldn't generalize types here
-
-fn binding_transform<'a, 'b, 'input>(
-    order: u16,
-    pat: Pattern<'input>,
-    expr: Expr<'input>,
-    is_rec: bool,
-    args: &mut Args<'a, 'input>,
-) -> Result<(iExpr<'input>, BTreeMap<ValPath, ConstraintValue<'input>>, Type), Error<'input>> {
-    let mut path = vec![order];
-    let mut val_consts = BTreeMap::new();
-    // remember how many closures was already there. Closures are added to global closures vector
-    // as the expression is processed, i.e. before type unification. This means we have to change
-    // their types inside the global vector
-    let closures_num = args.closures.len();
-    // we don't insert directly into the scope because we want to do type unification
-    // before inserting finally
-    let expr = if is_rec {
-        args.namescope.push_layer();
-        let next = pat.transform(0, 1, &mut path, args, ValPath::StaticVal, &mut val_consts);
-        expr.transform(0, next, args).0
-    } else {
-        let (e, next) = expr.transform(0, 1, args);
-        args.namescope.push_layer();
-        pat.transform(0, next, &mut path, args, ValPath::StaticVal, &mut val_consts);
-        e
-    };
-    let mut type_consts = args.type_consts.drain(0..).collect();
-    let mut map = unify::unify(&mut type_consts)?;
-    let mut local = args.namescope.pop_layer();
-    for (_, (_, t)) in local.iter_mut() {
-        t.substitute_vars(&map);
-        t.generalize_type();
-    }
-    args.namescope.extend_local(local);
-
-    // chnage types of closures added for this binding
-    for closure in args.closures.iter_mut().skip(closures_num) {
-        closure.substitute_types(&map);
-    }
-
-    let mut t = Type::Variable(0);
-    t.substitute_vars(&mut map);
-    t.generalize_type();
-    // let mut pretty = String::new();
-    // t.pretty_format(&mut pretty, args.type_decls);
-    // println!("{}",pretty);
-    Ok((expr, val_consts, t))
-}
 
 fn get_type_decl<'input>(
     name: &'input str,
@@ -359,20 +353,20 @@ fn fn_transform<'a, 'b, 'input>(
     fn_branches: Vec<(Vec<Pattern<'input>>, Expr<'input>)>,
     var: u16,
     next: u16,
-    args: &mut Args<'a, 'input>,
+    ctx: &mut TypingContext<'input>,
 ) -> (u16, u16) {
     // patterns per branch
     let len = fn_branches[0].0.len() as u16;
     debug_assert!(len > 0);
-    args.type_consts
+    ctx.type_consts
         .push((Type::Variable(var), mk_curried_type(next, len + 1)));
     let mut nnext = next + len + 1;
     let mut dtree = DTree::new();
     let mut branches = Vec::new();
-    args.namescope.push_layer();
+    ctx.namescope.push_layer();
     for (i, (pats, e)) in fn_branches.into_iter().enumerate().rev() {
         if pats.len() as u16 != len {
-            args.errors.push(Error::VariablePatsNum);
+            ctx.errors.push(Error::VariablePatsNum);
         }
 
         let mut path = vec![];
@@ -383,19 +377,19 @@ fn fn_transform<'a, 'b, 'input>(
                 next + j as u16,
                 nnext,
                 &mut path,
-                args,
+                ctx,
                 ValPath::Local,
                 &mut val_consts,
             );
             path.pop();
         }
         dtree.add_pattern(val_consts, i as u16);
-        let (e, tmp) = e.transform(next + len, nnext, args);
+        let (e, tmp) = e.transform(next + len, nnext, ctx);
         branches.push(e);
         nnext = tmp;
-        args.namescope.drain_local();
+        ctx.namescope.drain_local();
     }
-    let map = args.namescope.pop_layer();
+    let map = ctx.namescope.pop_layer();
     let mut captures = Vec::new();
     for (_, (val, t)) in map.into_iter() {
         match val {
@@ -408,7 +402,7 @@ fn fn_transform<'a, 'b, 'input>(
     captures.sort_unstable_by(|(ord1, _), (ord2, _)| ord1.cmp(ord2));
     let captures: Vec<(ValPath, Type)> = captures.into_iter().map(|(_, v)| v).collect();
     let is_static = captures.is_empty();
-    args.closures.push(Closure {
+    ctx.closures.push(Closure {
         captures,
         dtree,
         branches: branches.into_iter().rev().collect(),
@@ -417,7 +411,7 @@ fn fn_transform<'a, 'b, 'input>(
     });
     if is_static {}
 
-    ((args.closures.len() - 1) as u16, nnext)
+    ((ctx.closures.len() - 1) as u16, nnext)
 }
 
 impl<'input> Pattern<'input> {
@@ -425,12 +419,12 @@ impl<'input> Pattern<'input> {
     /// value bindings.
     /// ### RETURNS
     /// next free variable
-    fn transform<'a, 'b, T: Fn(Vec<u16>) -> ValPath + Copy>(
+    fn transform<'b, T: Fn(Vec<u16>) -> ValPath + Copy>(
         self,
         var: u16,
         next: u16,
         path: &mut Vec<u16>,
-        args: &mut Args<'a, 'input>,
+        ctx: &mut TypingContext<'input>,
         valpath_constructor: T,
         val_consts: &mut BTreeMap<ValPath, ConstraintValue<'input>>,
     ) -> u16 {
@@ -438,7 +432,7 @@ impl<'input> Pattern<'input> {
             Pattern::Error(..) => panic!("Parse Error not supposed to be propagated"),
             Pattern::Wild => next,
             Pattern::Literal(l) => {
-                args.type_consts.push((Type::Variable(var), l.get_type()));
+                ctx.type_consts.push((Type::Variable(var), l.get_type()));
                 if let Literal::Unit = l {
                     ()
                 } else {
@@ -446,13 +440,13 @@ impl<'input> Pattern<'input> {
                 }
                 next
             }
-            Pattern::Bind(s) => match args.namescope.local().get(&s) {
+            Pattern::Bind(s) => match ctx.namescope.local().get(&s) {
                 Some(_) => {
-                    args.errors.push(Error::MultBindPattern(s));
+                    ctx.errors.push(Error::MultBindPattern(s));
                     next
                 }
                 None => {
-                    args.namescope
+                    ctx.namescope
                         .local()
                         .insert(s, (valpath_constructor(path.clone()), Type::Variable(var)));
                     next
@@ -461,7 +455,7 @@ impl<'input> Pattern<'input> {
             Pattern::Tuple(v) => {
                 let len = v.len() as u16;
                 let mut nnext = next + len;
-                args.type_consts.push((
+                ctx.type_consts.push((
                     Type::Variable(var),
                     Type::Tuple((next..nnext).map(|i| Type::Variable(i)).collect()),
                 ));
@@ -469,19 +463,19 @@ impl<'input> Pattern<'input> {
                     let i = i as u16;
                     path.push(i);
                     nnext =
-                        pat.transform(next + i, nnext, path, args, valpath_constructor, val_consts);
+                        pat.transform(next + i, nnext, path, ctx, valpath_constructor, val_consts);
                     path.pop();
                 }
                 nnext
             }
-            Pattern::SumVar(constructor, pat) => match args.namescope.get(&constructor) {
+            Pattern::SumVar(constructor, pat) => match ctx.namescope.get(&constructor) {
                 None => {
-                    args.errors.push(Error::ConstructorNotFound(constructor));
+                    ctx.errors.push(Error::ConstructorNotFound(constructor));
                     next
                 }
                 Some(ni) => {
                     if let Type::Constructor { target, position } = ni.1 {
-                        let t = &args.type_decls[target as usize];
+                        let t = &ctx.type_decls[target as usize];
                         // The value constraint for the tag
                         val_consts.insert(
                             valpath_constructor({
@@ -503,16 +497,16 @@ impl<'input> Pattern<'input> {
                             ),
                             next + 1 + t.num_generics,
                         );
-                        args.type_consts.push((Type::Variable(var), to));
-                        args.type_consts.push((Type::Variable(next), from));
+                        ctx.type_consts.push((Type::Variable(var), to));
+                        ctx.type_consts.push((Type::Variable(next), from));
                         path.push(position);
                         debug_assert!(n2 >= n1);
                         let next =
-                            pat.transform(next, n2, path, args, valpath_constructor, val_consts);
+                            pat.transform(next, n2, path, ctx, valpath_constructor, val_consts);
                         path.pop();
                         next
                     } else {
-                        args.errors.push(Error::NonConstAppPattern(constructor));
+                        ctx.errors.push(Error::NonConstAppPattern(constructor));
                         next
                     }
                 }
@@ -522,23 +516,23 @@ impl<'input> Pattern<'input> {
 }
 
 impl<'input> Expr<'input> {
-    fn transform<'a, 'b>(self, var: u16, next: u16, args: &mut Args<'a, 'input>) -> (iExpr<'input>, u16) {
-        let sequence = |e1: Expr<'input>, e2: Expr<'input>, var1, var2, next, args: &mut Args<'a, 'input>| {
-            let (e1, next) = e1.transform(var1, next, args);
-            let (e2, next) = e2.transform(var2, next, args);
+    fn transform(self, var: u16, next: u16, ctx: &mut TypingContext<'input>) -> (iExpr<'input>, u16) {
+        let sequence = |e1: Expr<'input>, e2: Expr<'input>, var1, var2, next, ctx: &mut TypingContext<'input>| {
+            let (e1, next) = e1.transform(var1, next, ctx);
+            let (e2, next) = e2.transform(var2, next, ctx);
             (e1, e2, next)
         };
         match self {
             Expr::Error(..) => panic!("Parse Error not supposed to be propagated"),
             Expr::Literal(l) => {
-                args.type_consts.push((Type::Variable(var), l.get_type()));
+                ctx.type_consts.push((Type::Variable(var), l.get_type()));
                 (iExpr::Literal(l), next)
             }
-            Expr::Bound(s) => match args.namescope.get(&s) {
+            Expr::Bound(s) => match ctx.namescope.get(&s) {
                 Some(ni) => {
                     let (path, t) = &*ni;
                     let (t, next) = if let Type::Constructor { target, position } = t {
-                        let ttype = &args.type_decls[*target as usize];
+                        let ttype = &ctx.type_decls[*target as usize];
                         let (from, n1) = ttype.variants[*position as usize - 1].1.instantiate(next);
                         let (to, n2) = (
                             Type::Sum(
@@ -554,11 +548,11 @@ impl<'input> Expr<'input> {
                     } else {
                         t.instantiate(next)
                     };
-                    args.type_consts.push((Type::Variable(var), t));
+                    ctx.type_consts.push((Type::Variable(var), t));
                     (iExpr::Bound(path.clone()), next)
                 }
                 None => {
-                    args.errors.push(Error::NameNotFound(s));
+                    ctx.errors.push(Error::NameNotFound(s));
                     (iExpr::Error, next)
                 }
             },
@@ -566,42 +560,42 @@ impl<'input> Expr<'input> {
                 use self::BinOpcode::*;
                 let (e1, e2, next) = match op {
                     Add | Sub | Mul | Div | Mod => {
-                        args.type_consts.push((Type::Variable(var), Type::Int));
-                        sequence(*e1, *e2, var, var, next, args)
+                        ctx.type_consts.push((Type::Variable(var), Type::Int));
+                        sequence(*e1, *e2, var, var, next, ctx)
                     }
                     Greater | Less | GreaterEq | LessEq => {
-                        args.type_consts.push((Type::Variable(var), Type::Bool));
-                        args.type_consts.push((Type::Variable(next), Type::Int));
-                        sequence(*e1, *e2, next, next, next + 1, args)
+                        ctx.type_consts.push((Type::Variable(var), Type::Bool));
+                        ctx.type_consts.push((Type::Variable(next), Type::Int));
+                        sequence(*e1, *e2, next, next, next + 1, ctx)
                     }
                     Concat => {
-                        args.type_consts.push((Type::Variable(var), Type::String));
-                        sequence(*e1, *e2, var, var, next, args)
+                        ctx.type_consts.push((Type::Variable(var), Type::String));
+                        sequence(*e1, *e2, var, var, next, ctx)
                     }
                     Equal | NotEq => {
-                        args.type_consts.push((Type::Variable(var), Type::Bool));
-                        sequence(*e1, *e2, next, next, next + 1, args)
+                        ctx.type_consts.push((Type::Variable(var), Type::Bool));
+                        sequence(*e1, *e2, next, next, next + 1, ctx)
                     }
                     And | Or => {
-                        args.type_consts.push((Type::Variable(var), Type::Bool));
-                        sequence(*e1, *e2, var, var, next, args)
+                        ctx.type_consts.push((Type::Variable(var), Type::Bool));
+                        sequence(*e1, *e2, var, var, next, ctx)
                     }
                 };
                 (iExpr::BinOp(Box::new(e1), op, Box::new(e2)), next)
             }
             Expr::UnOp(UnOpcode::Minus, e) => {
-                args.type_consts.push((Type::Variable(var), Type::Int));
-                let (e, next) = e.transform(var, next, args);
+                ctx.type_consts.push((Type::Variable(var), Type::Int));
+                let (e, next) = e.transform(var, next, ctx);
                 (iExpr::UnOp(UnOpcode::Minus, Box::new(e)), next)
             }
             Expr::UnOp(UnOpcode::Not, e) => {
-                args.type_consts.push((Type::Variable(var), Type::Bool));
-                let (e, next) = e.transform(var, next, args);
+                ctx.type_consts.push((Type::Variable(var), Type::Bool));
+                let (e, next) = e.transform(var, next, ctx);
                 (iExpr::UnOp(UnOpcode::Not, Box::new(e)), next)
             }
             Expr::Tuple(v) => {
                 let mut nnext = next + v.len() as u16;
-                args.type_consts.push((
+                ctx.type_consts.push((
                     Type::Variable(var),
                     Type::Tuple(
                         (0..v.len())
@@ -612,7 +606,7 @@ impl<'input> Expr<'input> {
                 let mut v2 = Vec::new();
                 for (i, e) in v.into_iter().enumerate() {
                     // the rhs next is not the outer next, otherwise cannot update mutable nnext
-                    let (e, next) = e.transform(next + i as u16, nnext, args);
+                    let (e, next) = e.transform(next + i as u16, nnext, ctx);
                     v2.push(e);
                     nnext = next;
                 }
@@ -621,33 +615,33 @@ impl<'input> Expr<'input> {
             Expr::Application(e1, e2) => {
                 // TODO : if e1 is constructor ...
                 if let Expr::Bound(s) = *e1 {
-                    match args.namescope.get(s) {
+                    match ctx.namescope.get(s) {
                         Some((_, Type::Constructor { .. })) => (), // unimplemented!(),
                         Some(_) => (), // unimplemented!(),
                         None => (), // unimplemented!(),
                     }
                 }
-                args.type_consts.push((
+                ctx.type_consts.push((
                     Type::Variable(next),
                     Type::Function(
                         Box::new(Type::Variable(next + 1)),
                         Box::new(Type::Variable(var)),
                     ),
                 ));
-                let (e1, e2, next) = sequence(*e1, *e2, next, next + 1, next + 2, args);
+                let (e1, e2, next) = sequence(*e1, *e2, next, next + 1, next + 2, ctx);
                 (iExpr::Application(Box::new(e1), Box::new(e2)), next)
             }
             Expr::Conditional(cond, e1, e2) => {
-                args.type_consts.push((Type::Variable(next), Type::Bool));
-                let (cond, next) = cond.transform(next, next + 1, args);
-                let (e1, e2, next) = sequence(*e1, *e2, var, var, next, args);
+                ctx.type_consts.push((Type::Variable(next), Type::Bool));
+                let (cond, next) = cond.transform(next, next + 1, ctx);
+                let (e1, e2, next) = sequence(*e1, *e2, var, var, next, ctx);
                 (
                     iExpr::Conditional(Box::new(cond), Box::new(e1), Box::new(e2)),
                     next,
                 )
             }
             Expr::Closure(v) => {
-                let (idx, next) = fn_transform(v, var, next, args);
+                let (idx, next) = fn_transform(v, var, next, ctx);
                 (iExpr::Closure(idx), next)
             }
         }
