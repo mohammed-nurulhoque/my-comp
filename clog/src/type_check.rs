@@ -193,17 +193,42 @@ pub struct TypingContext<'input> {
 }
 
 impl<'input> TypingContext<'input> {
+
+    pub fn new() -> Self {
+        TypingContext {
+            type_decls: vec![],
+            closures: vec![],
+            globals: vec![], 
+            namescope: NameScope::new(),
+            type_consts: vec![], 
+            type_map: HashMap::new(), 
+            errors: vec![]
+        }
+    }
+
+    pub fn export(mut self) -> Result<Module<'input>, Error<'input>> {
+        Ok(Module {
+            closures: self.closures,
+            globals: self.globals,
+            type_decls: self.type_decls,
+            globals_names: self.namescope
+                .pop_layer()
+                .into_iter()
+                .map(|(s, (path, _))| (s, path))
+                .collect(),
+        })
+    }
+
+    pub fn add_imports(&mut self, map: HashMap<&'input str, (ValPath, Type)>) {
+        self.namescope.extend_local(map);
+    }
+
     pub fn add_binding(&mut self, binding: Binding<'input>) -> Result<(), Error<'input>> {
         match binding {
-            Binding::Type { name, vars, variants } => 
-                self.type_decls.push(get_type_decl(
-                    name,
-                    vars,
-                    variants,
-                    &mut self.type_map,
-                    &mut self.namescope,
-                    &mut self.errors,
-            )),
+            Binding::Type { name, vars, variants } => {
+                let t = self.get_type_decl(name, vars, variants);
+                self.type_decls.push(t);
+            }
             Binding::Value(pat, expr, is_rec) => {
                 let tuple = self.binding_transform(self.globals.len() as u16, pat, expr, is_rec)?;
                 self.globals.push(tuple)
@@ -272,146 +297,110 @@ impl<'input> TypingContext<'input> {
         // println!("{}",pretty);
         Ok((expr, val_consts, t))
     }
-}
 
-/// The transformation function, takes a series of bindings in AST form,
-/// which are either value binding or type declarations. Converts to
-/// a Module struct (see imper_ast.rs) which separated functions and
-/// variables.
-pub fn ast2imper_ast(bindings: Vec<Binding>) -> Result<Module, Error> {
-    let mut closures = Vec::new();
-    let mut global_scope = NameScope::new();
-    let mut globals = Vec::new();
-
-    // XXX hack
-    let map = HashMap::from_iter(vec![
-        ("print", (ValPath::Imported("print"), 
-            Type::Function(Box::new(Type::String), Box::new(Type::Unit)))),
-        ("i2str", (ValPath::Imported("i2str"),
-            Type::Function(Box::new(Type::Int), Box::new(Type::String)))),
-    ]);
-    global_scope.extend_local(map);
-
-    let mut type_decls = Vec::new();
-
-    Ok(Module {
-        closures,
-        globals,
-        type_decls,
-        globals_names: global_scope
-            .pop_layer()
-            .into_iter()
-            .map(|(s, (path, _))| (s, path))
-            .collect(),
-    })
-}
-
-
-fn get_type_decl<'input>(
-    name: &'input str,
-    vars: Vec<&'input str>,
-    variants: Vec<(&'input str, ProtoType<'input>)>,
-    type_map: &mut HashMap<&'input str, u16>,
-    namescope: &mut NameScope<'input>,
-    errors: &mut Vec<Error<'input>>,
-) -> TypeDecl<'input> {
-    let generics_map: HashMap<&'input str, u16> = vars
-        .into_iter()
-        .enumerate()
-        .map(|(i, s)| (s, i as u16))
-        .collect();
-    let len = type_map.len() as u16;
-    type_map.insert(name, len);
-    TypeDecl {
-        name,
-        num_generics: generics_map.len() as u16,
-        variants: variants
+    
+    fn get_type_decl(&mut self,
+        name: &'input str,
+        vars: Vec<&'input str>,
+        variants: Vec<(&'input str, ProtoType<'input>)>,
+    ) -> TypeDecl<'input> {
+        let generics_map: HashMap<&'input str, u16> = vars
             .into_iter()
             .enumerate()
-            .map(|(i, (s, t))| {
-                let t = match t.to_type(type_map, &generics_map) {
-                    Ok(t) => t,
-                    Err(e) => { errors.push(e); Type::Unit }
-                };
-                namescope.local().insert(
-                    s,
-                    (
-                        ValPath::Constructor(len, (i+1) as u16),
-                        Type::Constructor {
-                            target: len,
-                            position: (i + 1) as u16,
-                        },
-                    ),
-                );
-                (s, t)
-            })
-            .collect(),
-    }
-}
-
-fn fn_transform<'a, 'b, 'input>(
-    fn_branches: Vec<(Vec<Pattern<'input>>, Expr<'input>)>,
-    var: u16,
-    next: u16,
-    ctx: &mut TypingContext<'input>,
-) -> (u16, u16) {
-    // patterns per branch
-    let len = fn_branches[0].0.len() as u16;
-    debug_assert!(len > 0);
-    ctx.type_consts
-        .push((Type::Variable(var), mk_curried_type(next, len + 1)));
-    let mut nnext = next + len + 1;
-    let mut dtree = DTree::new();
-    let mut branches = Vec::new();
-    ctx.namescope.push_layer();
-    for (i, (pats, e)) in fn_branches.into_iter().enumerate().rev() {
-        if pats.len() as u16 != len {
-            ctx.errors.push(Error::VariablePatsNum);
+            .map(|(i, s)| (s, i as u16))
+            .collect();
+        let len = self.type_map.len() as u16;
+        self.type_map.insert(name, len);
+        TypeDecl {
+            name,
+            num_generics: generics_map.len() as u16,
+            variants: variants
+                .into_iter()
+                .enumerate()
+                .map(|(i, (s, t))| {
+                    let t = match t.to_type(&self.type_map, &generics_map) {
+                        Ok(t) => t,
+                        Err(e) => { self.errors.push(e); Type::Unit }
+                    };
+                    self.namescope.local().insert(
+                        s,
+                        (
+                            ValPath::Constructor(len, (i+1) as u16),
+                            Type::Constructor {
+                                target: len,
+                                position: (i + 1) as u16,
+                            },
+                        ),
+                    );
+                    (s, t)
+                })
+                .collect(),
         }
-
-        let mut path = vec![];
-        let mut val_consts = BTreeMap::new();
-        for (j, pat) in pats.into_iter().enumerate() {
-            path.push(j as u16);
-            nnext = pat.transform(
-                next + j as u16,
-                nnext,
-                &mut path,
-                ctx,
-                ValPath::Local,
-                &mut val_consts,
-            );
-            path.pop();
-        }
-        dtree.add_pattern(val_consts, i as u16);
-        let (e, tmp) = e.transform(next + len, nnext, ctx);
-        branches.push(e);
-        nnext = tmp;
-        ctx.namescope.drain_local();
     }
-    let map = ctx.namescope.pop_layer();
-    let mut captures = Vec::new();
-    for (_, (val, t)) in map.into_iter() {
-        match val {
-            ValPath::CaptureCaptured(n, _) | ValPath::CaptureLocal(n, _) => {
-                captures.push((n, (val, t)))
+
+    fn fn_transform(&mut self,
+        fn_branches: Vec<(Vec<Pattern<'input>>, Expr<'input>)>,
+        var: u16,
+        next: u16,
+    ) -> (u16, u16) {
+        // patterns per branch
+        let len = fn_branches[0].0.len() as u16;
+        debug_assert!(len > 0);
+        self.type_consts
+            .push((Type::Variable(var), mk_curried_type(next, len + 1)));
+        let mut nnext = next + len + 1;
+        let mut dtree = DTree::new();
+        let mut branches = Vec::new();
+        self.namescope.push_layer();
+        for (i, (pats, e)) in fn_branches.into_iter().enumerate().rev() {
+            if pats.len() as u16 != len {
+                self.errors.push(Error::VariablePatsNum);
             }
-            _ => panic!("non capture value path not expected here"),
+    
+            let mut path = vec![];
+            let mut val_consts = BTreeMap::new();
+            for (j, pat) in pats.into_iter().enumerate() {
+                path.push(j as u16);
+                nnext = pat.transform(
+                    next + j as u16,
+                    nnext,
+                    &mut path,
+                    self,
+                    ValPath::Local,
+                    &mut val_consts,
+                );
+                path.pop();
+            }
+            dtree.add_pattern(val_consts, i as u16);
+            let (e, tmp) = e.transform(next + len, nnext, self);
+            branches.push(e);
+            nnext = tmp;
+            self.namescope.drain_local();
         }
+        let map = self.namescope.pop_layer();
+        let mut captures = Vec::new();
+        for (_, (val, t)) in map.into_iter() {
+            match val {
+                ValPath::CaptureCaptured(n, _) | ValPath::CaptureLocal(n, _) => {
+                    captures.push((n, (val, t)))
+                }
+                _ => panic!("non capture value path not expected here"),
+            }
+        }
+        captures.sort_unstable_by(|(ord1, _), (ord2, _)| ord1.cmp(ord2));
+        let captures: Vec<(ValPath, Type)> = captures.into_iter().map(|(_, v)| v).collect();
+        let is_static = captures.is_empty();
+        self.closures.push(Closure {
+            captures,
+            dtree,
+            branches: branches.into_iter().rev().collect(),
+            args: (next..(next + len)).map(|n| Type::Variable(n)).collect(),
+            return_type: Type::Variable(next + len),
+        });
+        if is_static {}
+    
+        ((self.closures.len() - 1) as u16, nnext)
     }
-    captures.sort_unstable_by(|(ord1, _), (ord2, _)| ord1.cmp(ord2));
-    let captures: Vec<(ValPath, Type)> = captures.into_iter().map(|(_, v)| v).collect();
-    let is_static = captures.is_empty();
-    ctx.closures.push(Closure {
-        captures,
-        dtree,
-        branches: branches.into_iter().rev().collect(),
-        args: (next..(next + len)).map(|n| Type::Variable(n)).collect(),
-        return_type: Type::Variable(next + len),
-    });
-    if is_static {}
-
-    ((ctx.closures.len() - 1) as u16, nnext)
 }
 
 impl<'input> Pattern<'input> {
@@ -641,7 +630,7 @@ impl<'input> Expr<'input> {
                 )
             }
             Expr::Closure(v) => {
-                let (idx, next) = fn_transform(v, var, next, ctx);
+                let (idx, next) = ctx.fn_transform(v, var, next);
                 (iExpr::Closure(idx), next)
             }
         }
