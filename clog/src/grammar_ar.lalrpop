@@ -13,12 +13,11 @@ Statement: Binding<'input> = {
     TypeDecl,
     ValBinding,
     FnBinding,
-    Method,
 }
 
 Comma<T> : Vec<T> = {
     <T> => vec![<>],
-    <v: (<T> ",")+> <last: T?> => {
+    <v: (<T> "،")+> <last: T?> => {
         let mut v = v;
         if let Some(e) = last {
             v.push(e);
@@ -29,7 +28,7 @@ Comma<T> : Vec<T> = {
 
 // at least 2 elements
 Comma2<T>: Vec<T> = {
-    <v: (<T> ",")+> <last: T> ","? => {
+    <v: (<T> "،")+> <last: T> "،"? => {
         let mut v = v;
         v.push(last);
         v
@@ -37,7 +36,7 @@ Comma2<T>: Vec<T> = {
 }
 
 TypeDecl: Binding<'input> = {
-    "type" <name:ID> <vars:TypeVars?> "=" <variants:SumVarDecl+> => {
+    "نمط" <name:ID> <vars:TypeVars?> "=" <variants:SumVarDecl+> => {
         Binding::Type { name, vars: vars.unwrap_or(vec![]), variants }
     }
 };
@@ -53,16 +52,12 @@ SumVarDecl: (&'input str, ProtoType<'input>) = {
 };
 
 ValBinding: Binding<'input> = {
-    "let" <Pattern> "=" <Expr> => Binding::Value(<>, false),
+    "ليكن" <Pattern> "=" <Expr> => Binding::Value(<>, false),
 };
 
 FnBinding: Binding<'input> = {
-    "rec" <name:ID> "=" "{" <v:Comma<Arm>> "}" => Binding::Value(Pattern::Bind(name), Expr::Closure(v), true),
+    "رد" <name:ID> "=" "{" <v:Comma<Arm>> "}" => Binding::Value(Pattern::Bind(name), Expr::Closure(v), true),
 };
-
-Method: Binding<'input> = {
-    "def" <type_name:ID> "." <method_name:ID> "=" "{" <v:Comma<Arm>> "}" => Binding::Method(type_name, method_name, Expr::Closure(v)),
-}
 
 Arm = {
     <Pattern+> "=>" <Expr>,
@@ -95,14 +90,14 @@ UnaryClass<Op, NextClass>: Expr<'input> = {
 
 Type: ProtoType<'input> = {
     <SimpleType>,
-    <from:SimpleType> "->" <to:Type> => ProtoType::Function(Box::new(from), Box::new(to)),
+    <from:SimpleType> "<-" <to:Type> => ProtoType::Function(Box::new(from), Box::new(to)),
 };
 
 SimpleType: ProtoType<'input> = {
     "()" => ProtoType::Unit,
-    "int" => ProtoType::Int,
-    "bool" => ProtoType::Bool,
-    "string" => ProtoType::String,
+    "صح" => ProtoType::Int,
+    "حق" => ProtoType::Bool,
+    "نص" => ProtoType::String,
     "(" <Type> ")",
     <ID> => ProtoType::Generic(<>),
     <name:ID> <tp:SimpleType> => ProtoType::Sum(name, Box::new(tp)),
@@ -110,13 +105,17 @@ SimpleType: ProtoType<'input> = {
     <start: @L> ! <end: @R> => { errors.push(start); ProtoType::Error(<>) },
 };
 
+pub Expr: Expr<'input> = {
+    <e1:Expr> "[" <e2:Expr> "]" => Expr::BinOp(Box::new(e1), BinOpcode::Index, Box::new(e2)),
+    Expr0,
+}
 
-pub Expr = Class<Op0,Expr1>;       // and or
+Expr0 = Class<Op0,Expr1>;       // and or
 Expr1 = Class<Op1,Expr2>;       // compare
 Expr2 = Class<Op2,Expr3>;       // eq !=
-Expr3 = Class<Op3,Expr4>;       // term
-Expr4 = Class<Op4,Expr5>;       // factor
-Expr5 = UnaryClass<Op5,Term>;   // unary
+Expr3 = Class<Op3,Expr4>;       // factor
+Expr4 = Class<Op4,Expr5>;       // term
+Expr5 = UnaryClass<Op5,Term>;   //unary
 
 Term: Expr<'input>  = {
     <hd:Base> <v:Base*> => {
@@ -129,7 +128,7 @@ Term: Expr<'input>  = {
 };
 
 Base: Expr<'input> = {
-    "if" <cond:Expr> "then" <a:Expr> "else" <b:Expr> "end" => {
+    "لو" <cond:Expr> "إذن" <a:Expr> "وإلا" <b:Expr> "تم" => {
         Expr::Conditional(Box::new(cond), Box::new(a), Box::new(b))
     },
     "{" <v:Comma<Arm>> "}" => Expr::Closure(v),
@@ -138,34 +137,31 @@ Base: Expr<'input> = {
     "(" <Comma2<Expr>> ")" => Expr::Tuple(<>),
     "(" <Expr> ")",
     <start: @L> ! <end: @R> => { errors.push(start); Expr::Error(<>) },
-    <e1:Base> "[" <e2:Expr> "]" => Expr::BinOp(Box::new(e1), BinOpcode::Index, Box::new(e2)),
-    <e1:Base> "[" <e2:Expr> ":" <e3:Expr> "]" => Expr::Slice(Box::new(e1), Box::new(e2), Box::new(e3)),
-    <object:Base> "." <method:ID> => Expr::MethodCall(Box::new(object), method),
 };
 
 Literal: Literal<'input> = {
     r#""(\\.|[^"\\])*""# => Literal::String(&<>[1..(<>.len()-1)]),
     r"[0-9]+" => Literal::Int(isize::from_str_radix(<>, 10).unwrap()),
-    "true" => Literal::Bool(true),
-    "false" => Literal::Bool(false),
+    "صواب" => Literal::Bool(true),
+    "خطأ" => Literal::Bool(false),
     "()" => Literal::Unit,
 };
 
 Op0: BinOpcode = {
-    "and" => BinOpcode::And,
-    "or" => BinOpcode::Or,
+    "ثم" => BinOpcode::And,
+    "أو" => BinOpcode::Or,
 };
 
 Op1: BinOpcode = {
-    ">" => BinOpcode::Greater,
-    "<" => BinOpcode::Less,
-    ">=" => BinOpcode::GreaterEq,
-    "<=" => BinOpcode::LessEq,
+    "<" => BinOpcode::Greater,
+    ">" => BinOpcode::Less,
+    "=<" => BinOpcode::GreaterEq,
+    "=>" => BinOpcode::LessEq,
 };
 
 Op2: BinOpcode = {
     "=" => BinOpcode::Equal,
-    "!=" => BinOpcode::NotEq,
+    "=!" => BinOpcode::NotEq,
 };
 
 Op3: BinOpcode = {
@@ -181,10 +177,10 @@ Op4: BinOpcode = {
 };
 
 Op5: UnOpcode = {
-    "not" => UnOpcode::Not,
+    "ليس" => UnOpcode::Not,
     "-" => UnOpcode::Minus,
 };
 
 ID: &'input str = {
-    r"[a-zA-Z_][a-zA-Z_'0-9]*" => <>,
+    r"\pL\w*" => <>,
 }

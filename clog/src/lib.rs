@@ -1,5 +1,3 @@
-#![feature(nll)]
-#![feature(box_syntax)]
 //#![warn(missing_docs)]
 pub mod ast;
 pub mod grammar;

@@ -90,10 +90,12 @@ pub enum Expr<'input> {
     Bound(ValPath),
     Tuple(Vec<Expr<'input>>),
 
+    Slice(Box<Expr<'input>>, Box<Expr<'input>>, Box<Expr<'input>>),
+
     BinOp(Box<Expr<'input>>, BinOpcode, Box<Expr<'input>>),
     UnOp(UnOpcode, Box<Expr<'input>>),
 
-    /// closure which is an index into Module.anon_funcs
+    /// closure which is an index into Module.closures
     Closure(u16),
     /// Apply e1 on e2
     Application(Box<Expr<'input>>, Box<Expr<'input>>),

@@ -5,3 +5,4 @@ authors = ["Mohammed Alateyya <mnur@cmu.edu>"]
 edition = "2018"
 
 [dependencies]
+clog = { path = "../clog"}

@@ -12,6 +12,8 @@ use clog::{
     types::{BinOpcode, Literal, UnOpcode},
 };
 
+use crate::stdlib::std_call;
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -116,6 +118,14 @@ impl<'a, 'input> Context<'a, 'input> {
             &Expr::Literal(Literal::Bool(p)) => Ok(Rc::new(Value::Bool(p))),
             &Expr::Literal(Literal::String(s)) => Ok(Rc::new(Value::String(s.to_owned()))),
             &Expr::Bound(ref path) => self.resolve(path),
+            &Expr::Slice(ref e1, ref e2, ref e3) => {
+                match (&*self.eval_exp(e1)?, &*self.eval_exp(e2)?, &*self.eval_exp(e3)?) {
+                    (Value::String(s), Value::Int(a), Value::Int(b)) => {
+                        Ok(Rc::new(Value::String(s.chars().skip(*a as usize).take((b-a) as usize).collect())))
+                    },
+                    _ => panic!("Runtime Type Error")
+                }
+            }
             &Expr::UnOp(op, ref e) => self.eval_unop(op, e),
             &Expr::BinOp(ref e1, op, ref e2) => self.eval_binop(e1, op, e2),
             &Expr::Closure(n) => Ok(Rc::new(Value::Closure(n, self.gen_captures(n)?, vec![]))),
@@ -147,54 +157,63 @@ impl<'a, 'input> Context<'a, 'input> {
         }
     }
 
+
+    // XXX equality needs complete rewrite
+    // XXX collapse 2-level match to 1
     fn eval_binop(&self, e1: &Expr, op: BinOpcode, e2: &Expr) -> Result<Rc<Value>, IntrpErr> {
+        use BinOpcode::*;
         match (&*self.eval_exp(e1)?, &*self.eval_exp(e2)?) {
+            (Value::String(s), Value::Int(n)) => match op {
+                Index => Ok(Rc::new(Value::Int(s.chars().nth(*n as usize)
+                            .expect(&format!("Index {} out of range for string \"{}\"", n, s)) as isize))),
+                _ => Err(IntrpErr::TypeMismatch)
+            }
             (Value::Int(n), Value::Int(m)) => match op {
-                BinOpcode::Add => Ok(Rc::new(Value::Int(n + m))),
-                BinOpcode::Sub => Ok(Rc::new(Value::Int(n - m))),
-                BinOpcode::Mul => Ok(Rc::new(Value::Int(n * m))),
-                BinOpcode::Div => Ok(Rc::new(Value::Int(n / m))),
-                BinOpcode::Mod => Ok(Rc::new(Value::Int(n % m))),
-                BinOpcode::Equal => Ok(Rc::new(Value::Bool(n == m))),
-                BinOpcode::NotEq => Ok(Rc::new(Value::Bool(n != m))),
-                BinOpcode::Greater => Ok(Rc::new(Value::Bool(n > m))),
-                BinOpcode::GreaterEq => Ok(Rc::new(Value::Bool(n >= m))),
-                BinOpcode::Less => Ok(Rc::new(Value::Bool(n < m))),
-                BinOpcode::LessEq => Ok(Rc::new(Value::Bool(n <= m))),
+                Add => Ok(Rc::new(Value::Int(n + m))),
+                Sub => Ok(Rc::new(Value::Int(n - m))),
+                Mul => Ok(Rc::new(Value::Int(n * m))),
+                Div => Ok(Rc::new(Value::Int(n / m))),
+                Mod => Ok(Rc::new(Value::Int(n % m))),
+                Equal => Ok(Rc::new(Value::Bool(n == m))),
+                NotEq => Ok(Rc::new(Value::Bool(n != m))),
+                Greater => Ok(Rc::new(Value::Bool(n > m))),
+                GreaterEq => Ok(Rc::new(Value::Bool(n >= m))),
+                Less => Ok(Rc::new(Value::Bool(n < m))),
+                LessEq => Ok(Rc::new(Value::Bool(n <= m))),
                 _ => Err(IntrpErr::TypeMismatch),
             },
             (&Value::Bool(p), &Value::Bool(q)) => match op {
-                BinOpcode::And => Ok(Rc::new(Value::Bool(p && q))),
-                BinOpcode::Or => Ok(Rc::new(Value::Bool(p || q))),
-                BinOpcode::Equal => Ok(Rc::new(Value::Bool(p == q))),
-                BinOpcode::NotEq => Ok(Rc::new(Value::Bool(p != q))),
+                And => Ok(Rc::new(Value::Bool(p && q))),
+                Or => Ok(Rc::new(Value::Bool(p || q))),
+                Equal => Ok(Rc::new(Value::Bool(p == q))),
+                NotEq => Ok(Rc::new(Value::Bool(p != q))),
                 _ => Err(IntrpErr::TypeMismatch),
             },
             (Value::Unit, Value::Unit) => match op {
-                BinOpcode::Equal => Ok(Rc::new(Value::Bool(true))),
-                BinOpcode::NotEq => Ok(Rc::new(Value::Bool(false))),
+                Equal => Ok(Rc::new(Value::Bool(true))),
+                NotEq => Ok(Rc::new(Value::Bool(false))),
                 _ => Err(IntrpErr::TypeMismatch),
             },
             (Value::String(s1), Value::String(s2)) => match op {
-                BinOpcode::Equal => Ok(Rc::new(Value::Bool(s1 == s2))),
-                BinOpcode::NotEq => Ok(Rc::new(Value::Bool(s1 != s2))),
-                BinOpcode::Concat => Ok(Rc::new(Value::String(s1.clone()+s2))),
+                Equal => Ok(Rc::new(Value::Bool(s1 == s2))),
+                NotEq => Ok(Rc::new(Value::Bool(s1 != s2))),
+                Concat => Ok(Rc::new(Value::String(s1.clone()+s2))),
                 _ => Err(IntrpErr::TypeMismatch),
             },
 
             // NOTE: All equality operations below need reconsideration
             (Value::SumVar(..), Value::SumVar(..)) => match op {
-                BinOpcode::Equal | BinOpcode::NotEq => panic!("sum type equality"),
+                Equal | BinOpcode::NotEq => panic!("sum type equality"),
                 _ => Err(IntrpErr::TypeMismatch),
             },
             (Value::Tuple(v1), Value::Tuple(v2)) => match op {
-                BinOpcode::Equal => Ok(Rc::new(Value::Bool(v1 == v2))),
-                BinOpcode::NotEq => Ok(Rc::new(Value::Bool(v1 != v2))),
+                Equal => Ok(Rc::new(Value::Bool(v1 == v2))),
+                NotEq => Ok(Rc::new(Value::Bool(v1 != v2))),
                 _ => Err(IntrpErr::TypeMismatch),
             },
             (c1 @ Value::Closure(..), c2 @ Value::Closure(..)) => match op {
-                BinOpcode::Equal => Ok(Rc::new(Value::Bool(c1 == c2))),
-                BinOpcode::NotEq => Ok(Rc::new(Value::Bool(c1 != c2))),
+                Equal => Ok(Rc::new(Value::Bool(c1 == c2))),
+                NotEq => Ok(Rc::new(Value::Bool(c1 != c2))),
                 _ => Err(IntrpErr::TypeMismatch),
             },
             _ => Err(IntrpErr::TypeMismatch),
@@ -226,7 +245,7 @@ impl<'a, 'input> Context<'a, 'input> {
             }
             Value::Imported(name) => {
                 let e2 = self.eval_exp(e2)?;
-                stl_call(name, e2)
+                std_call(name, e2)
             }
             _ => Err(IntrpErr::TypeMismatch),
         }
@@ -403,23 +422,5 @@ pub fn match_tree(tree: &DTree, valvec: &Vec<Rc<Value>>) -> Result<u16, IntrpErr
             _ => Err(IntrpErr::TypeMismatch),
         },
         _ => Err(IntrpErr::InvalidPath),
-    }
-}
-
-
-fn stl_call(function: &str, value: Rc<Value>) -> Result<Rc<Value>,IntrpErr> {
-    match function {
-        "print" => if let Value::String(ref s) = *value {
-                print!("{}", s.replace("\\n", "\n"));
-                Ok(Rc::new(Value::Unit))
-            } else {
-                panic!("Unexpected")
-            },
-        "i2str" => if let Value::Int(i) = *value {
-                Ok(Rc::new(Value::String(format!("{}", i))))
-            } else {
-                panic!("Unexpected")
-            }
-        _ => panic!("Not implemented")
     }
 }

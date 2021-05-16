@@ -2,20 +2,20 @@
 
 use crate::types::{ProtoType, Literal, BinOpcode, UnOpcode};
 
-/// Binds a name to a type definition or a expression to a pattern,
-/// every top level declaration is of this type
+/// A top level declaration, which is a value or a type declaration
 #[derive(Debug)]
 pub enum Binding<'input> {
     /// A type declaration
     Type {
         /// name to bind the type to
         name: &'input str, 
-        /// generic variables
+        /// names of generics
         vars: Vec<&'input str>,
         /// variants' names and arguments' types
         variants: Vec<(&'input str, ProtoType<'input>)> },
     /// A value binding, bool for is recursive?
     Value(Pattern<'input>, Expr<'input>, bool),
+    Method(&'input str, &'input str, Expr<'input>)
 }
 
 /// A pattern or LHS of a binding to match
@@ -49,12 +49,14 @@ pub enum Expr<'input> {
     BinOp(Box<Expr<'input>>, BinOpcode, Box<Expr<'input>>),
     /// the value of applying a unary operation on an Expr
     UnOp(UnOpcode, Box<Expr<'input>>),
+    Slice(Box<Expr<'input>>, Box<Expr<'input>>, Box<Expr<'input>>),
 
     /// A closure is a sequence of patterns and corresponsing expressions
     Closure(Vec<(Vec<Pattern<'input>>, Expr<'input>)>),
     /// Apply an expression on an expression,
     /// including constructing values of sum types
     Application(Box<Expr<'input>>, Box<Expr<'input>>),
+    MethodCall(Box<Expr<'input>>, &'input str),
     /// if e1 then e2 else e3
     Conditional(Box<Expr<'input>>, Box<Expr<'input>>, Box<Expr<'input>>),
     /// Parse error

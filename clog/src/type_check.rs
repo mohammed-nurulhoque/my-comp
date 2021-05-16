@@ -4,7 +4,6 @@
 //! to imperAST.
 
 use std::collections::{BTreeMap, HashMap};
-use std::iter::FromIterator;
 
 use crate::{
     ast::{Binding, Expr, Pattern},
@@ -92,7 +91,7 @@ mod test {
         );
         assert_eq!(
             ns.get("Node").unwrap(),
-            &(
+            &((<>)
                 ValPath::Constructor(1, 2),
                 Type::Constructor {
                     target: 1,
@@ -232,7 +231,8 @@ impl<'input> TypingContext<'input> {
             Binding::Value(pat, expr, is_rec) => {
                 let tuple = self.binding_transform(self.globals.len() as u16, pat, expr, is_rec)?;
                 self.globals.push(tuple)
-            }
+            },
+            Binding::Method(type_name, method_name, body) => panic!("Method Definition"),
         }
         Ok(())
     }
@@ -545,9 +545,22 @@ impl<'input> Expr<'input> {
                     (iExpr::Error, next)
                 }
             },
+            Expr::Slice(e1, e2, e3) => {
+                ctx.type_consts.push((Type::Variable(var), Type::String));
+                ctx.type_consts.push((Type::Variable(next), Type::Int));
+                let (e1, nnext) = e1.transform(var, next+1, ctx);
+                let (e2, nnext) = e2.transform(next, nnext, ctx);
+                let (e3, nnext) = e3.transform(next, nnext, ctx);
+                (iExpr::Slice(Box::new(e1), Box::new(e2), Box::new(e3)), nnext)
+            },
             Expr::BinOp(e1, op, e2) => {
                 use self::BinOpcode::*;
                 let (e1, e2, next) = match op {
+                    Index => {
+                        ctx.type_consts.push((Type::Variable(var), Type::Int));
+                        ctx.type_consts.push((Type::Variable(next), Type::String));
+                        sequence(*e1, *e2, next, var, next+1, ctx)
+                    }
                     Add | Sub | Mul | Div | Mod => {
                         ctx.type_consts.push((Type::Variable(var), Type::Int));
                         sequence(*e1, *e2, var, var, next, ctx)
@@ -620,6 +633,7 @@ impl<'input> Expr<'input> {
                 let (e1, e2, next) = sequence(*e1, *e2, next, next + 1, next + 2, ctx);
                 (iExpr::Application(Box::new(e1), Box::new(e2)), next)
             }
+            Expr::MethodCall(object, method) => panic!("Method Call"),
             Expr::Conditional(cond, e1, e2) => {
                 ctx.type_consts.push((Type::Variable(next), Type::Bool));
                 let (cond, next) = cond.transform(next, next + 1, ctx);

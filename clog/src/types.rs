@@ -153,6 +153,9 @@ impl<'input> Literal<'input> {
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum BinOpcode {
+    
+    Index,
+
     Add,
     Sub,
     Mul,

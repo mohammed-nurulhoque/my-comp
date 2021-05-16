@@ -1,3 +1,20 @@
-let _ = print "Test\n"
-let _ = print ("Hello" ++ "World\n")
-let _ = print (i2str 5)
+type list t =
+    | Nil ()
+    | Cons (t, list t)
+
+type option t =
+    | None ()
+    | Some t
+
+rec find_space_ = {
+    "" n => None (),
+    s n  => if s[0] = 32 then Some n else find_space_ s[1:len s] (n+1) end,
+}
+
+let find_space = { s => find_space_ s 0 }
+
+rec loop = {
+    _ => { () => loop () } (print (i2str ({ (Some n) => n, (None ()) => 0} (find_space (readline ()))) ++ "\n"))
+}
+
+let _ = loop ()
