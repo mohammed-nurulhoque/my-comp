@@ -1,0 +1,196 @@
+\documentclass[a4paper]{article}
+\usepackage{mathtools}
+\usepackage{bussproofs}
+\usepackage{xcolor}
+
+\newcommand{\ctype}[1]{#1 ctype}
+\newcommand{\type}[1]{#1 type}
+\newcommand{\method}[1]{#1 method}
+\newcommand{\trait}[1]{trait\{#1\}}
+\newcommand{\fn}[2]{#1 $\rightarrow$ #2}
+\newcommand{\mfn}[3]{#2 $\xrightarrow{\textnormal{#1}}$ #3}
+\newcommand{\Star}[1]{{\color{red}(}#1{\color{red})*}}
+\newcommand{\Plus}[1]{{\color{red}(}#1{\color{red})+}}
+\newcommand{\Or}{{\color{red}$|$}}
+\newcommand{\Maybe}[1]{{\color{red}(}#1{\color{red})?}}
+
+\begin{document}
+
+\section{Syntax}
+
+\subsection{Programs}
+
+\begin{tabular}{rl}
+    P &::= \Star{Use \Or{} TypeDef \Or{} Stmt}
+\end{tabular}
+
+\subsection{Type definitions}
+\begin{tabular}{rl}
+    TypeDef &::= \texttt{type} ID \Star{ID} = \Plus{$|$ ID Type}\\
+    Type &::= \texttt{' \Or{} int \Or{} byte \Or{} bool \Or{} float \Or{} str}\\
+    &::= \texttt{(} \Plus{Type ,} Type \texttt{)}\\
+    &::= Type \texttt{=>} Type\\
+    &::= \texttt{[} Type \texttt{]}\\
+    &::= \texttt{(} Type \texttt{)}
+\end{tabular}
+
+\subsection{Statements}
+\begin{tabular}{rl}
+    Stmt &::= \texttt{let \Maybe{rec}} Pat = Exp \Or{} ID Pat\\
+    &::= let ID . ID = FnExp
+\end{tabular}
+
+\subsection{Patterns}
+\begin{tabular}{rl}
+    Pat &::= Lit \Or{} \texttt{(} \Plus{Pat ,} Pat \texttt{)} \Or{} ID Pat\\
+    &::= \texttt{[]} \Or{} \texttt{[} \Star{Pat ,} Pat  \Maybe{, ... ID} \texttt{]}\\
+    &::= \texttt{(} Pat \texttt{)}
+\end{tabular}
+
+\subsection{Expressions}
+\begin{tabular}{rl}
+    Exp &::= Lit \Or{} ID \Or{} \texttt{(} \Plus{Exp ,} Exp \texttt{)}\\
+    &::= Unop Exp \Or{} Exp Binop Exp\\
+    &::= FnExp\\
+    &::= Exp Exp \Or{} Exp \$ Exp\\
+    &::= Exp . ID\\
+    &::= \texttt{(} Exp \texttt{)}\\
+    FnExp &::= \texttt{\{} \Star{\Star{Pat ,} \texttt{=>} Exp ,}\texttt{\}}
+\end{tabular}
+\section{Hello World!}
+
+Hello World
+\[
+\AxiomC{A}
+\RightLabel{1}
+\UnaryInfC{$\bot$}
+\DisplayProof
+\quad
+\AxiomC{A}
+\RightLabel{(2)}
+\UnaryInfC{$\bot$}
+\DisplayProof
+\quad
+\AxiomC{A}
+\RightLabel{\scriptsize(3)}
+\UnaryInfC{$\bot$}
+\DisplayProof
+\quad
+\AxiomC{A}
+\LeftLabel{(4)}
+\UnaryInfC{$\bot$}
+\DisplayProof
+\]
+
+\section{Typing}
+\subsection{Type Definitions}
+\subsubsection{Composable Types}
+\[
+    \AxiomC{}
+    \UnaryInfC{\ctype{$s_i$}}
+    \DisplayProof\quad
+    %
+    \AxiomC{}
+    \UnaryInfC{\ctype{$\alpha_i$}}
+    \DisplayProof\quad
+    %
+\]
+\[
+    \AxiomC{\ctype{$\tau_1$}}
+    \AxiomC{\dots}
+    \AxiomC{\ctype{$\tau_n$}}
+    \TrinaryInfC{\ctype{$(\tau_1, \dots, \tau_n$)}}
+    \DisplayProof\quad
+    %
+    \AxiomC{}
+    \UnaryInfC{\ctype{$c_i\{\tau_1\dots\tau_n\}$}}
+    \DisplayProof\quad
+\]
+\[
+    \AxiomC{\ctype{$\tau_1$}}
+    \AxiomC{\ctype{$\tau_2$}}
+    \BinaryInfC{\ctype{\fn{$\tau_1$}{$\tau_2$}}}
+    \DisplayProof\quad
+    %
+    \AxiomC{\method{$m_1$}}
+    \AxiomC{\dots}
+    \AxiomC{\method{$m_n$}}
+    \TrinaryInfC{\ctype{\trait{$m_1,\dots, m_n$}}}
+    \DisplayProof
+\]
+
+\subsubsection{Methods}
+\[
+    \AxiomC{\type{\mfn{$\ell$}{$\tau_1$}{$\tau$}}}
+    \AxiomC{\dots}
+    \AxiomC{\type{\mfn{$\ell$}{$\tau_n$}{$\tau$}}}
+    \TrinaryInfC{\method{($\ell,\tau$)}}
+    \DisplayProof
+\]
+
+\subsubsection{Types}
+\[
+    \AxiomC{\ctype{$\tau$}}
+    \UnaryInfC{\type{$\tau$}}
+    \DisplayProof\quad
+    %
+    \AxiomC{\ctype{$\tau_1$}}
+    \AxiomC{\ctype{$\tau_2$}}
+    \BinaryInfC{\type{\mfn{$\ell $}{$\tau_1$}{$\tau_2$}}}
+    \DisplayProof
+\]
+
+\subsubsection{Subtyping}
+\[
+    \AxiomC{\ctype{$\tau$}}
+    \UnaryInfC{$\tau\preceq\tau$}
+    \DisplayProof\quad
+    %
+    \AxiomC{\ctype{$\tau$}}
+    \UnaryInfC{$\tau\preceq\alpha_i$}
+    \DisplayProof\quad
+    %
+\]
+\[
+    \AxiomC{$\tau_1\preceq\tau_1'$}
+    \AxiomC{\dots}
+    \AxiomC{$\tau_n\preceq\tau_n'$}
+    \TrinaryInfC{$(\tau_1, \dots, \tau_n)\preceq (\tau_1', \dots, \tau_n')$}
+    \DisplayProof\quad
+    %
+    \AxiomC{$\tau_1\preceq\tau_1'$}
+    \AxiomC{\dots}
+    \AxiomC{$\tau_n\preceq\tau_n'$}
+    \TrinaryInfC{$c_i\{\tau_1\dots\tau_n\}\preceq c_i\{\tau_1'\dots\tau_n'\}$}
+    \DisplayProof\quad
+\]
+\[
+    \AxiomC{$\tau_1{\color{blue}\succeq}\tau_1'$}
+    \AxiomC{$\tau_2\preceq\tau_2'$}
+    \BinaryInfC{\fn{$\tau_1$}{$\tau_2$}$\preceq$\fn{$\tau_1'$}{$\tau_2'$}}
+    \DisplayProof\quad
+    %
+    \AxiomC{$M_1\subseteq M_2$}
+    \UnaryInfC{\trait{$M_1$}$\preceq$\trait{$M_2$}}
+    \DisplayProof\quad
+\]
+
+\subsection{Programs}
+\[
+    \AxiomC{}
+    \UnaryInfC{lit$(\tau)_i$ exp}
+    \DisplayProof\quad
+    %
+    \AxiomC{$e_1$ exp}
+    \AxiomC{$e_2$ exp}
+    \BinaryInfC{$e_1 ~e_2$ exp}
+    \DisplayProof\quad
+    %
+    \AxiomC{$e_1$ exp}
+    \UnaryInfC{$e_1\cdot\ell$ exp}
+    \DisplayProof\quad
+\]
+\[
+    x
+\]
+\end{document} 

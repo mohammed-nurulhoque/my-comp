@@ -1,4 +1,4 @@
-#![feature(box_syntax)]
+//#![feature(box_syntax)]
 
 use std::env;
 use std::fs::File;

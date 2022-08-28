@@ -189,6 +189,7 @@ pub struct TypingContext<'input> {
     type_consts: Vec<TypeConstraint>,
     type_map: HashMap<&'input str, u16>,
     errors: Vec<Error<'input>>,
+    next: usize,
 }
 
 impl<'input> TypingContext<'input> {
@@ -201,7 +202,8 @@ impl<'input> TypingContext<'input> {
             namescope: NameScope::new(),
             type_consts: vec![], 
             type_map: HashMap::new(), 
-            errors: vec![]
+            errors: vec![],
+            next: 0,
         }
     }
 
@@ -220,6 +222,10 @@ impl<'input> TypingContext<'input> {
 
     pub fn add_imports(&mut self, map: HashMap<&'input str, (ValPath, Type)>) {
         self.namescope.extend_local(map);
+    }
+
+    pub fn add_constr(&mut self, var: u16, constraint: Type) {
+        self.type_consts.push((Type::Variable(var), constraint));
     }
 
     pub fn add_binding(&mut self, binding: Binding<'input>) -> Result<(), Error<'input>> {
@@ -421,7 +427,7 @@ impl<'input> Pattern<'input> {
             Pattern::Error(..) => panic!("Parse Error not supposed to be propagated"),
             Pattern::Wild => next,
             Pattern::Literal(l) => {
-                ctx.type_consts.push((Type::Variable(var), l.get_type()));
+                ctx.add_constr(var, l.get_type());
                 if let Literal::Unit = l {
                     ()
                 } else {
@@ -444,10 +450,7 @@ impl<'input> Pattern<'input> {
             Pattern::Tuple(v) => {
                 let len = v.len() as u16;
                 let mut nnext = next + len;
-                ctx.type_consts.push((
-                    Type::Variable(var),
-                    Type::Tuple((next..nnext).map(|i| Type::Variable(i)).collect()),
-                ));
+                ctx.add_constr(var, Type::Tuple((next..nnext).map(|i| Type::Variable(i)).collect()));
                 for (i, pat) in v.into_iter().enumerate() {
                     let i = i as u16;
                     path.push(i);
@@ -486,8 +489,8 @@ impl<'input> Pattern<'input> {
                             ),
                             next + 1 + t.num_generics,
                         );
-                        ctx.type_consts.push((Type::Variable(var), to));
-                        ctx.type_consts.push((Type::Variable(next), from));
+                        ctx.add_constr(var, to);
+                        ctx.add_constr(next, from);
                         path.push(position);
                         debug_assert!(n2 >= n1);
                         let next =
@@ -514,7 +517,7 @@ impl<'input> Expr<'input> {
         match self {
             Expr::Error(..) => panic!("Parse Error not supposed to be propagated"),
             Expr::Literal(l) => {
-                ctx.type_consts.push((Type::Variable(var), l.get_type()));
+                ctx.add_constr(var, l.get_type());
                 (iExpr::Literal(l), next)
             }
             Expr::Bound(s) => match ctx.namescope.get(&s) {
@@ -537,6 +540,7 @@ impl<'input> Expr<'input> {
                     } else {
                         t.instantiate(next)
                     };
+                    // borrow checker doesn't accept ctx.add_constr here
                     ctx.type_consts.push((Type::Variable(var), t));
                     (iExpr::Bound(path.clone()), next)
                 }
@@ -546,8 +550,8 @@ impl<'input> Expr<'input> {
                 }
             },
             Expr::Slice(e1, e2, e3) => {
-                ctx.type_consts.push((Type::Variable(var), Type::String));
-                ctx.type_consts.push((Type::Variable(next), Type::Int));
+                ctx.add_constr(var, Type::String);
+                ctx.add_constr(next, Type::Int);
                 let (e1, nnext) = e1.transform(var, next+1, ctx);
                 let (e2, nnext) = e2.transform(next, nnext, ctx);
                 let (e3, nnext) = e3.transform(next, nnext, ctx);
@@ -557,41 +561,41 @@ impl<'input> Expr<'input> {
                 use self::BinOpcode::*;
                 let (e1, e2, next) = match op {
                     Index => {
-                        ctx.type_consts.push((Type::Variable(var), Type::Int));
-                        ctx.type_consts.push((Type::Variable(next), Type::String));
+                        ctx.add_constr(var, Type::Int);
+                        ctx.add_constr(next, Type::String);
                         sequence(*e1, *e2, next, var, next+1, ctx)
                     }
                     Add | Sub | Mul | Div | Mod => {
-                        ctx.type_consts.push((Type::Variable(var), Type::Int));
+                        ctx.add_constr(var, Type::Int);
                         sequence(*e1, *e2, var, var, next, ctx)
                     }
                     Greater | Less | GreaterEq | LessEq => {
-                        ctx.type_consts.push((Type::Variable(var), Type::Bool));
-                        ctx.type_consts.push((Type::Variable(next), Type::Int));
+                        ctx.add_constr(var, Type::Bool);
+                        ctx.add_constr(next, Type::Int);
                         sequence(*e1, *e2, next, next, next + 1, ctx)
                     }
                     Concat => {
-                        ctx.type_consts.push((Type::Variable(var), Type::String));
+                        ctx.add_constr(var, Type::String);
                         sequence(*e1, *e2, var, var, next, ctx)
                     }
                     Equal | NotEq => {
-                        ctx.type_consts.push((Type::Variable(var), Type::Bool));
+                        ctx.add_constr(var, Type::Bool);
                         sequence(*e1, *e2, next, next, next + 1, ctx)
                     }
                     And | Or => {
-                        ctx.type_consts.push((Type::Variable(var), Type::Bool));
+                        ctx.add_constr(var, Type::Bool);
                         sequence(*e1, *e2, var, var, next, ctx)
                     }
                 };
                 (iExpr::BinOp(Box::new(e1), op, Box::new(e2)), next)
             }
             Expr::UnOp(UnOpcode::Minus, e) => {
-                ctx.type_consts.push((Type::Variable(var), Type::Int));
+                ctx.add_constr(var, Type::Int);
                 let (e, next) = e.transform(var, next, ctx);
                 (iExpr::UnOp(UnOpcode::Minus, Box::new(e)), next)
             }
             Expr::UnOp(UnOpcode::Not, e) => {
-                ctx.type_consts.push((Type::Variable(var), Type::Bool));
+                ctx.add_constr(var, Type::Bool);
                 let (e, next) = e.transform(var, next, ctx);
                 (iExpr::UnOp(UnOpcode::Not, Box::new(e)), next)
             }
@@ -635,7 +639,7 @@ impl<'input> Expr<'input> {
             }
             Expr::MethodCall(object, method) => panic!("Method Call"),
             Expr::Conditional(cond, e1, e2) => {
-                ctx.type_consts.push((Type::Variable(next), Type::Bool));
+                ctx.add_constr(next, Type::Bool);
                 let (cond, next) = cond.transform(next, next + 1, ctx);
                 let (e1, e2, next) = sequence(*e1, *e2, var, var, next, ctx);
                 (
